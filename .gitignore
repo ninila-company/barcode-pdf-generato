@@ -1,0 +1,30 @@
+# Папки кэша Python
+__pycache__/
+*.pyc
+
+# Папки виртуального окружения
+.venv/
+venv/
+env/
+
+# Сгенерированные файлы
+*.pdf
+
+# Папки IDE (для VSCode, PyCharm и т.д.)
+.vscode/
+.idea/
+
+# Файлы сборки и дистрибуции
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Логи и отчеты
+*.log
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Системные файлы
+.DS_Store
