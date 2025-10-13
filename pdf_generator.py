@@ -3,6 +3,8 @@ import os
 from PIL import Image
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 
@@ -26,15 +28,37 @@ def create_pdf_from_barcodes(
     if not existing_image_paths:
         raise ValueError("Не найдено ни одного файла для размещения в PDF.")
 
+    # --- Регистрация шрифта с поддержкой кириллицы ---
+    # Стандартные шрифты (Helvetica) не поддерживают кириллицу.
+    # Регистрируем шрифт Verdana, который обычно есть в Windows.
+    try:
+        # Имя 'Verdana' - это внутренний идентификатор для reportlab
+        # 'Verdana.ttf' - имя файла шрифта в системе
+        pdfmetrics.registerFont(TTFont("Verdana", "Verdana.ttf"))
+        font_name = "Verdana"
+    except Exception:
+        # Если Verdana не найден, возвращаемся к стандартному, но кириллица не будет работать
+        font_name = "Helvetica"
+
     # --- Размещение изображений на PDF-странице ---
     print("Создание PDF документа...")
     c = canvas.Canvas(output_path, pagesize=A4)
     page_width, page_height = A4  # Размеры страницы в пунктах (points)
 
+    doc_title = os.path.splitext(os.path.basename(output_path))[0]
+
+    def draw_page_header(canvas_obj):
+        """Рисует заголовок вверху страницы."""
+        canvas_obj.setFont(font_name, 12)
+        canvas_obj.drawCentredString(page_width / 2.0, page_height - 15 * mm, doc_title)
+
+    draw_page_header(c)  # Рисуем заголовок на первой странице
+
     # Задаем размеры и отступы в миллиметрах и конвертируем в пункты
     img_draw_width = 45 * mm
     margin_x = 10 * mm
-    margin_y = 10 * mm
+    margin_y_top = 25 * mm  # Увеличили верхний отступ для заголовка
+    margin_y_bottom = 10 * mm
     gap_x = 2 * mm
     gap_y = 5 * mm
 
@@ -47,7 +71,7 @@ def create_pdf_from_barcodes(
 
     # Начальные координаты для первого изображения (левый верхний угол, с учетом отступов)
     x = margin_x
-    y = page_height - margin_y - img_draw_height
+    y = page_height - margin_y_top - img_draw_height
 
     barcode_types = list(selected_barcodes.keys())
     for i, filename in enumerate(barcode_types):
@@ -67,11 +91,12 @@ def create_pdf_from_barcodes(
                 y -= img_draw_height + gap_y
 
             # Проверяем, не выходим ли за нижний край страницы
-            if y < margin_y:
+            if y < margin_y_bottom:
                 c.showPage()  # Завершаем текущую страницу
+                draw_page_header(c)  # Рисуем заголовок на новой странице
                 # Сбрасываем координаты для новой страницы
                 x = margin_x
-                y = page_height - margin_y - img_draw_height
+                y = page_height - margin_y_top - img_draw_height
 
             # Рисуем изображение на холсте PDF
             c.drawImage(full_path, x, y, width=img_draw_width, height=img_draw_height)
@@ -88,9 +113,9 @@ def create_pdf_from_barcodes(
                 y -= img_draw_height + gap_y
 
             # Проверяем, не нужно ли перейти на новую страницу перед отрисовкой линии
-            if y < margin_y:
+            if y < margin_y_bottom:
                 c.showPage()
-                y = page_height - margin_y - img_draw_height
+                y = page_height - margin_y_top - img_draw_height
                 continue  # Не рисуем линию в самом верху новой страницы
 
             # Рисуем линию в промежутке между строками
