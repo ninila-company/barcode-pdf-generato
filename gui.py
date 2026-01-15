@@ -1,8 +1,11 @@
 import configparser
 import os
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import win32api
+import win32print
 from PIL import Image, ImageTk
 
 import pdf_generator
@@ -189,7 +192,13 @@ class BarcodePDFApp(tk.Tk):
         generate_button = ttk.Button(
             left_panel, text="Сгенерировать PDF", command=self.process_generation
         )
-        generate_button.pack(pady=(5, 10))
+        generate_button.pack(pady=(5, 0))
+
+        # --- Новая кнопка "Сгенерировать и печатать" ---
+        print_button = ttk.Button(
+            left_panel, text="Сгенерировать и печатать", command=self.process_printing
+        )
+        print_button.pack(pady=(5, 10))
 
         # --- 4. Фрейм для предпросмотра ---
         preview_frame = ttk.LabelFrame(right_panel, text="Предпросмотр", padding=10)
@@ -411,7 +420,7 @@ class BarcodePDFApp(tk.Tk):
 
         # Создаем временное поле для ввода
         current_value = self.generation_list_view.item(item_id, "values")[1]
-        entry = ttk.Entry(self.generation_list_view, width=width)
+        entry = ttk.Entry(self.generation_list_view)
         entry.place(x=x, y=y, width=width, height=height)
         entry.insert(0, current_value)
         entry.focus_set()
@@ -579,7 +588,10 @@ class BarcodePDFApp(tk.Tk):
             self.update_idletasks()  # Обновляем интерфейс
 
             pdf_generator.create_pdf_from_barcodes(
-                selected_barcodes, self.barcode_dir, file_path
+                selected_barcodes,
+                self.barcode_dir,
+                file_path,
+                title=os.path.splitext(os.path.basename(file_path))[0],
             )
 
             messagebox.showinfo(
@@ -598,6 +610,54 @@ class BarcodePDFApp(tk.Tk):
             # Разблокируем окно в любом случае (даже после ошибки)
             self.attributes("-disabled", False)
             self.focus_set()  # Возвращаем фокус окну
+
+    def process_printing(self):
+        """
+        Обрабатывает нажатие на кнопку "Сгенерировать и печатать".
+        """
+        selected_barcodes = self.selected_for_generation
+        if not selected_barcodes:
+            messagebox.showwarning("Внимание", "Список для генерации пуст.")
+            return
+
+        temp_file_descriptor, temp_file_path = tempfile.mkstemp(suffix=".pdf")
+        os.close(temp_file_descriptor)
+
+        try:
+            self.attributes("-disabled", True)
+            self.update_status("Генерация PDF для печати...")
+            self.update_idletasks()
+
+            pdf_generator.create_pdf_from_barcodes(
+                selected_barcodes,
+                self.barcode_dir,
+                temp_file_path,
+                title="Печать штрих-кодов",
+            )
+
+            self.update_status("Отправка на печать...")
+            self.update_idletasks()
+
+            # Проверяем, есть ли принтер по умолчанию
+            try:
+                win32print.GetDefaultPrinter()
+            except RuntimeError:
+                messagebox.showerror("Ошибка печати", "Принтер по умолчанию не найден.")
+                return
+
+            win32api.ShellExecute(0, "print", temp_file_path, "", ".", 0)
+            self.update_status("Документ отправлен на печать. Готово.")
+            messagebox.showinfo("Печать", "Документ отправлен на печать.")
+
+        except Exception as e:
+            print(f"Ошибка при генерации или печати PDF: {e}")
+            messagebox.showerror("Ошибка", f"Произошла ошибка:\n{e}")
+            self.update_status("Ошибка при печати. Готово.")
+        finally:
+            self.attributes("-disabled", False)
+            self.focus_set()
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
 
 if __name__ == "__main__":

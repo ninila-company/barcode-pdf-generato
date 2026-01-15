@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 from PIL import Image
 from reportlab.lib.pagesizes import A4
@@ -9,7 +10,10 @@ from reportlab.pdfgen import canvas
 
 
 def create_pdf_from_barcodes(
-    selected_barcodes: dict, source_dir: str, output_path: str
+    selected_barcodes: dict,
+    source_dir: str,
+    output_path: str,
+    title: Optional[str] = None,
 ):
     """
     Основная функция, реализующая ядро приложения.
@@ -45,7 +49,7 @@ def create_pdf_from_barcodes(
     c = canvas.Canvas(output_path, pagesize=A4)
     page_width, page_height = A4  # Размеры страницы в пунктах (points)
 
-    doc_title = os.path.splitext(os.path.basename(output_path))[0]
+    doc_title = title if title else os.path.splitext(os.path.basename(output_path))[0]
 
     def draw_page_header(canvas_obj):
         """Рисует заголовок вверху страницы."""
