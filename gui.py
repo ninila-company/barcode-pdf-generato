@@ -656,8 +656,6 @@ class BarcodePDFApp(tk.Tk):
         finally:
             self.attributes("-disabled", False)
             self.focus_set()
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
 
 
 if __name__ == "__main__":
