@@ -19,6 +19,7 @@ build/
 dist/
 *.egg-info/
 *.spec
+config.ini
 
 # Логи и отчеты
 *.log

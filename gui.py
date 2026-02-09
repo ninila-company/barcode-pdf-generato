@@ -7,6 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 import win32api
 import win32print
 from PIL import Image, ImageTk
+import fitz  # PyMuPDF
 
 import pdf_generator
 
@@ -26,6 +27,7 @@ class BarcodePDFApp(tk.Tk):
         # --- Конфигурация ---
         self.config_file = "config.ini"
         self.barcode_dir = r"barcode_images"  # Значение по умолчанию
+        self.selected_printer = None  # Для хранения имени выбранного принтера
         self.load_config()  # Загружаем путь из файла
 
         # Словарь для хранения выбранных для генерации файлов {имя_файла: количество}
@@ -49,11 +51,24 @@ class BarcodePDFApp(tk.Tk):
             self.barcode_dir = config.get(
                 "Settings", "BarcodeDir", fallback=self.barcode_dir
             )
+            self.selected_printer = config.get(
+                "Settings", "SelectedPrinter", fallback=None
+            )
+
+        # Если принтер не был сохранен в конфиге, пытаемся получить принтер по умолчанию
+        if not self.selected_printer:
+            try:
+                self.selected_printer = win32print.GetDefaultPrinter()
+            except RuntimeError:  # Ошибка, если принтеры не установлены
+                self.selected_printer = None
 
     def save_config(self):
         """Сохраняет текущую конфигурацию в файл .ini."""
         config = configparser.ConfigParser()
-        config["Settings"] = {"BarcodeDir": self.barcode_dir}
+        config["Settings"] = {
+            "BarcodeDir": self.barcode_dir,
+            "SelectedPrinter": self.selected_printer or "",
+        }
         with open(self.config_file, "w", encoding="utf-8") as configfile:
             config.write(configfile)
 
@@ -200,6 +215,12 @@ class BarcodePDFApp(tk.Tk):
         )
         print_button.pack(pady=(5, 10))
 
+        # --- Новая кнопка "Предпросмотр PDF" ---
+        preview_button = ttk.Button(
+            left_panel, text="Предпросмотр PDF", command=self.process_preview
+        )
+        preview_button.pack(pady=(0, 10))
+
         # --- 4. Фрейм для предпросмотра ---
         preview_frame = ttk.LabelFrame(right_panel, text="Предпросмотр", padding=10)
         preview_frame.pack(fill="both", expand=True)
@@ -229,6 +250,32 @@ class BarcodePDFApp(tk.Tk):
         browse_button.grid(row=1, column=1, sticky="w", padx=(10, 0))
 
         settings_frame.columnconfigure(0, weight=1)
+
+        # --- Фрейм для настроек принтера ---
+        printer_frame = ttk.LabelFrame(parent_tab, text="Настройки печати", padding=15)
+        printer_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Label(printer_frame, text="Принтер:").grid(
+            row=0, column=0, sticky="w", pady=(0, 5)
+        )
+
+        self.printer_selector = ttk.Combobox(printer_frame, state="readonly", width=68)
+        self.printer_selector.grid(row=1, column=0, sticky="ew")
+        self.printer_selector.bind("<<ComboboxSelected>>", self.on_printer_select)
+
+        printer_frame.columnconfigure(0, weight=1)
+
+        self.load_printers()
+
+    def load_printers(self):
+        """Загружает список доступных принтеров в Combobox."""
+        printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+        self.printer_selector["values"] = printers
+        if self.selected_printer in printers:
+            self.printer_selector.set(self.selected_printer)
+        elif printers:
+            self.printer_selector.current(0)
+            self.selected_printer = self.printer_selector.get()
 
     def load_barcode_list(self):
         """
@@ -343,6 +390,12 @@ class BarcodePDFApp(tk.Tk):
         # Фильтруем список
         filtered_files = [f for f in self.all_barcode_files if search_term in f.lower()]
         self.barcode_selector["values"] = filtered_files
+
+    def on_printer_select(self, event=None):
+        """Сохраняет выбранный принтер в конфигурацию."""
+        self.selected_printer = self.printer_selector.get()
+        self.save_config()
+        self.update_status(f"Принтер по умолчанию изменен на: {self.selected_printer}")
 
     def add_to_list(self):
         """Добавляет выбранный штрих-код и количество в список для генерации."""
@@ -611,6 +664,31 @@ class BarcodePDFApp(tk.Tk):
             self.attributes("-disabled", False)
             self.focus_set()  # Возвращаем фокус окну
 
+    def process_preview(self):
+        """
+        Генерирует PDF во временный файл и открывает окно предпросмотра.
+        """
+        selected_barcodes = self.selected_for_generation
+        if not selected_barcodes:
+            messagebox.showwarning("Внимание", "Список для генерации пуст.")
+            return
+
+        # Создаем временный файл, но не удаляем его сразу
+        temp_file_descriptor, temp_file_path = tempfile.mkstemp(suffix=".pdf")
+        os.close(temp_file_descriptor)
+
+        try:
+            self.update_status("Генерация PDF для предпросмотра...")
+            pdf_generator.create_pdf_from_barcodes(
+                selected_barcodes, self.barcode_dir, temp_file_path, "Preview"
+            )
+            self.update_status("Готово к предпросмотру.")
+            # Открываем окно предпросмотра, передавая ему путь к файлу
+            PDFPreviewWindow(self, temp_file_path, self.selected_printer)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать PDF для предпросмотра:\n{e}")
+            os.remove(temp_file_path) # Удаляем временный файл в случае ошибки
+
     def process_printing(self):
         """
         Обрабатывает нажатие на кнопку "Сгенерировать и печатать".
@@ -638,14 +716,23 @@ class BarcodePDFApp(tk.Tk):
             self.update_status("Отправка на печать...")
             self.update_idletasks()
 
-            # Проверяем, есть ли принтер по умолчанию
-            try:
-                win32print.GetDefaultPrinter()
-            except RuntimeError:
-                messagebox.showerror("Ошибка печати", "Принтер по умолчанию не найден.")
+            # Проверяем, выбран ли принтер
+            if not self.selected_printer:
+                messagebox.showerror(
+                    "Ошибка печати",
+                    "Принтер не выбран. Проверьте настройки и наличие принтеров в системе.",
+                )
                 return
 
-            win32api.ShellExecute(0, "print", temp_file_path, "", ".", 0)
+            # Используем команду 'printto' для печати на конкретном принтере
+            win32api.ShellExecute(
+                0,  # hwnd
+                "printto",  # verb
+                temp_file_path,  # file
+                f'"{self.selected_printer}"',  # params: printer name
+                ".",  # directory
+                0,  # show command
+            )
             self.update_status("Документ отправлен на печать. Готово.")
             messagebox.showinfo("Печать", "Документ отправлен на печать.")
 
@@ -657,6 +744,105 @@ class BarcodePDFApp(tk.Tk):
             self.attributes("-disabled", False)
             self.focus_set()
 
+
+class PDFPreviewWindow(tk.Toplevel):
+    """Окно для предпросмотра PDF-файла перед печатью."""
+
+    def __init__(self, parent, pdf_path, selected_printer):
+        super().__init__(parent)
+        self.parent = parent
+        self.pdf_path = pdf_path
+        self.selected_printer = selected_printer
+        self.doc = None
+        self.current_page = 0
+        self.total_pages = 0
+        self.photo_image = None  # Ссылка на изображение
+
+        self.title("Предпросмотр PDF")
+        self.geometry("800x600")
+        self.transient(parent)  # Окно будет поверх родительского
+        self.grab_set()  # Модальное окно
+
+        try:
+            self.doc = fitz.open(self.pdf_path)
+            self.total_pages = len(self.doc)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось открыть PDF-файл:\n{e}", parent=self)
+            self.destroy()
+            return
+
+        self.create_widgets()
+        self.load_page()
+
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def create_widgets(self):
+        # --- Верхняя панель с навигацией ---
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(fill="x", padx=10, pady=5)
+
+        self.prev_button = ttk.Button(nav_frame, text="<< Пред.", command=self.prev_page)
+        self.prev_button.pack(side="left")
+
+        self.page_label = ttk.Label(nav_frame, text="Страница 1/1", anchor="center")
+        self.page_label.pack(side="left", expand=True, fill="x")
+
+        self.next_button = ttk.Button(nav_frame, text="След. >>", command=self.next_page)
+        self.next_button.pack(side="left")
+
+        print_button = ttk.Button(nav_frame, text="Печать", command=self.print_pdf)
+        print_button.pack(side="right", padx=(20, 0))
+
+        # --- Область для отображения страницы ---
+        self.canvas = tk.Canvas(self, bg="gray")
+        self.canvas.pack(fill="both", expand=True)
+
+    def load_page(self):
+        if not self.doc:
+            return
+
+        page = self.doc.load_page(self.current_page)
+        # Рендерим страницу в изображение (pixmap)
+        pix = page.get_pixmap()
+        # Конвертируем в формат, понятный tkinter
+        img_data = pix.tobytes("ppm")
+        self.photo_image = tk.PhotoImage(data=img_data)
+
+        # Отображаем на холсте
+        self.canvas.create_image(0, 0, anchor="nw", image=self.photo_image)
+
+        # Обновляем информацию о странице
+        self.page_label.config(text=f"Страница {self.current_page + 1}/{self.total_pages}")
+        self.prev_button.config(state="normal" if self.current_page > 0 else "disabled")
+        self.next_button.config(state="normal" if self.current_page < self.total_pages - 1 else "disabled")
+
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.load_page()
+
+    def next_page(self):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.load_page()
+
+    def print_pdf(self):
+        if not self.selected_printer:
+            messagebox.showerror("Ошибка печати", "Принтер не выбран.", parent=self)
+            return
+
+        try:
+            win32api.ShellExecute(0, "printto", self.pdf_path, f'"{self.selected_printer}"', ".", 0)
+            messagebox.showinfo("Печать", "Документ отправлен на печать.", parent=self)
+            self.on_close() # Закрываем окно после отправки на печать
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось отправить на печать:\n{e}", parent=self)
+
+    def on_close(self):
+        if self.doc:
+            self.doc.close()
+        os.remove(self.pdf_path)  # Удаляем временный файл
+        self.destroy()
 
 if __name__ == "__main__":
     app = BarcodePDFApp()
