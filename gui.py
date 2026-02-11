@@ -4,10 +4,10 @@ import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import fitz  # PyMuPDF
 import win32api
 import win32print
 from PIL import Image, ImageTk
-import fitz  # PyMuPDF
 
 import pdf_generator
 
@@ -29,6 +29,22 @@ class BarcodePDFApp(tk.Tk):
         self.barcode_dir = r"barcode_images"  # Значение по умолчанию
         self.selected_printer = None  # Для хранения имени выбранного принтера
         self.load_config()  # Загружаем путь из файла
+        # --- Настройки страницы с значениями по умолчанию ---
+        self.margin_top = self.app_config.getint(
+            "PageSettings", "MarginTop", fallback=25
+        )
+        self.margin_bottom = self.app_config.getint(
+            "PageSettings", "MarginBottom", fallback=10
+        )
+        self.margin_left = self.app_config.getint(
+            "PageSettings", "MarginLeft", fallback=10
+        )
+        self.margin_right = self.app_config.getint(
+            "PageSettings", "MarginRight", fallback=10
+        )
+        self.orientation = self.app_config.get(
+            "PageSettings", "Orientation", fallback="Книжная"
+        )
 
         # Словарь для хранения выбранных для генерации файлов {имя_файла: количество}
         self.selected_for_generation = {}
@@ -45,13 +61,13 @@ class BarcodePDFApp(tk.Tk):
 
     def load_config(self):
         """Загружает конфигурацию из файла .ini."""
-        config = configparser.ConfigParser()
+        self.app_config = configparser.ConfigParser()
         if os.path.exists(self.config_file):
-            config.read(self.config_file, encoding="utf-8")
-            self.barcode_dir = config.get(
+            self.app_config.read(self.config_file, encoding="utf-8")
+            self.barcode_dir = self.app_config.get(
                 "Settings", "BarcodeDir", fallback=self.barcode_dir
             )
-            self.selected_printer = config.get(
+            self.selected_printer = self.app_config.get(
                 "Settings", "SelectedPrinter", fallback=None
             )
 
@@ -64,13 +80,19 @@ class BarcodePDFApp(tk.Tk):
 
     def save_config(self):
         """Сохраняет текущую конфигурацию в файл .ini."""
-        config = configparser.ConfigParser()
-        config["Settings"] = {
+        self.app_config["Settings"] = {
             "BarcodeDir": self.barcode_dir,
             "SelectedPrinter": self.selected_printer or "",
         }
+        self.app_config["PageSettings"] = {
+            "MarginTop": str(self.margin_top),
+            "MarginBottom": str(self.margin_bottom),
+            "MarginLeft": str(self.margin_left),
+            "MarginRight": str(self.margin_right),
+            "Orientation": self.orientation,
+        }
         with open(self.config_file, "w", encoding="utf-8") as configfile:
-            config.write(configfile)
+            self.app_config.write(configfile)
 
     def create_widgets(self):
         """
@@ -132,7 +154,9 @@ class BarcodePDFApp(tk.Tk):
         ttk.Label(selection_frame, text="Штрих-код:").grid(
             row=0, column=0, padx=(0, 5), sticky="w"
         )
-        self.barcode_selector = ttk.Combobox(selection_frame, state="normal", width=30)
+        self.barcode_selector = ttk.Combobox(
+            selection_frame, state="normal", width=30, height=20
+        )
         self.barcode_selector.grid(row=0, column=1, padx=5, sticky="ew")
         # Обновляем предпросмотр при выборе из списка
         self.barcode_selector.bind(
@@ -267,9 +291,86 @@ class BarcodePDFApp(tk.Tk):
 
         self.load_printers()
 
+        # --- Фрейм для настроек страницы ---
+        page_settings_frame = ttk.LabelFrame(
+            parent_tab, text="Настройки страницы (мм)", padding=15
+        )
+        page_settings_frame.pack(fill="x", padx=10, pady=10)
+
+        # Поля
+        ttk.Label(page_settings_frame, text="Верхнее:").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.margin_top_entry = ttk.Entry(page_settings_frame, width=10)
+        self.margin_top_entry.grid(row=0, column=1, sticky="w", padx=5)
+        self.margin_top_entry.insert(0, str(self.margin_top))
+
+        ttk.Label(page_settings_frame, text="Нижнее:").grid(
+            row=0, column=2, sticky="w", padx=(10, 0)
+        )
+        self.margin_bottom_entry = ttk.Entry(page_settings_frame, width=10)
+        self.margin_bottom_entry.grid(row=0, column=3, sticky="w", padx=5)
+        self.margin_bottom_entry.insert(0, str(self.margin_bottom))
+
+        ttk.Label(page_settings_frame, text="Левое:").grid(
+            row=1, column=0, sticky="w", pady=(5, 0)
+        )
+        self.margin_left_entry = ttk.Entry(page_settings_frame, width=10)
+        self.margin_left_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(5, 0))
+        self.margin_left_entry.insert(0, str(self.margin_left))
+
+        ttk.Label(page_settings_frame, text="Правое:").grid(
+            row=1, column=2, sticky="w", padx=(10, 0), pady=(5, 0)
+        )
+        self.margin_right_entry = ttk.Entry(page_settings_frame, width=10)
+        self.margin_right_entry.grid(row=1, column=3, sticky="w", padx=5, pady=(5, 0))
+        self.margin_right_entry.insert(0, str(self.margin_right))
+
+        # Ориентация
+        ttk.Label(page_settings_frame, text="Ориентация:").grid(
+            row=2, column=0, sticky="w", pady=(10, 0)
+        )
+        self.orientation_selector = ttk.Combobox(
+            page_settings_frame, state="readonly", values=["Книжная", "Альбомная"]
+        )
+        self.orientation_selector.grid(
+            row=2, column=1, columnspan=3, sticky="ew", pady=(10, 0)
+        )
+        self.orientation_selector.set(self.orientation)
+
+        # Привязка событий для сохранения
+        self.margin_top_entry.bind("<FocusOut>", self.on_page_settings_change)
+        self.margin_bottom_entry.bind("<FocusOut>", self.on_page_settings_change)
+        self.margin_left_entry.bind("<FocusOut>", self.on_page_settings_change)
+        self.margin_right_entry.bind("<FocusOut>", self.on_page_settings_change)
+        self.orientation_selector.bind(
+            "<<ComboboxSelected>>", self.on_page_settings_change
+        )
+
+    def on_page_settings_change(self, event=None):
+        """Сохраняет настройки страницы при их изменении."""
+        try:
+            self.margin_top = int(self.margin_top_entry.get())
+            self.margin_bottom = int(self.margin_bottom_entry.get())
+            self.margin_left = int(self.margin_left_entry.get())
+            self.margin_right = int(self.margin_right_entry.get())
+            self.orientation = self.orientation_selector.get()
+            self.save_config()
+            self.update_status("Настройки страницы сохранены.")
+        except ValueError:
+            messagebox.showerror(
+                "Ошибка ввода", "Значения полей должны быть целыми числами."
+            )
+            # Можно вернуть старые значения для наглядности
+
     def load_printers(self):
         """Загружает список доступных принтеров в Combobox."""
-        printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+        printers = [
+            p[2]
+            for p in win32print.EnumPrinters(
+                win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+            )
+        ]
         self.printer_selector["values"] = printers
         if self.selected_printer in printers:
             self.printer_selector.set(self.selected_printer)
@@ -640,11 +741,21 @@ class BarcodePDFApp(tk.Tk):
             self.update_status("Генерация PDF...")
             self.update_idletasks()  # Обновляем интерфейс
 
+            page_settings = {
+                "margins": {
+                    "top": self.margin_top,
+                    "bottom": self.margin_bottom,
+                    "left": self.margin_left,
+                    "right": self.margin_right,
+                },
+                "orientation": self.orientation,
+            }
             pdf_generator.create_pdf_from_barcodes(
                 selected_barcodes,
                 self.barcode_dir,
                 file_path,
                 title=os.path.splitext(os.path.basename(file_path))[0],
+                page_settings=page_settings,
             )
 
             messagebox.showinfo(
@@ -679,15 +790,30 @@ class BarcodePDFApp(tk.Tk):
 
         try:
             self.update_status("Генерация PDF для предпросмотра...")
+            page_settings = {
+                "margins": {
+                    "top": self.margin_top,
+                    "bottom": self.margin_bottom,
+                    "left": self.margin_left,
+                    "right": self.margin_right,
+                },
+                "orientation": self.orientation,
+            }
             pdf_generator.create_pdf_from_barcodes(
-                selected_barcodes, self.barcode_dir, temp_file_path, "Preview"
+                selected_barcodes,
+                self.barcode_dir,
+                temp_file_path,
+                "Preview",
+                page_settings,
             )
             self.update_status("Готово к предпросмотру.")
             # Открываем окно предпросмотра, передавая ему путь к файлу
             PDFPreviewWindow(self, temp_file_path, self.selected_printer)
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось создать PDF для предпросмотра:\n{e}")
-            os.remove(temp_file_path) # Удаляем временный файл в случае ошибки
+            messagebox.showerror(
+                "Ошибка", f"Не удалось создать PDF для предпросмотра:\n{e}"
+            )
+            os.remove(temp_file_path)  # Удаляем временный файл в случае ошибки
 
     def process_printing(self):
         """
@@ -706,11 +832,21 @@ class BarcodePDFApp(tk.Tk):
             self.update_status("Генерация PDF для печати...")
             self.update_idletasks()
 
+            page_settings = {
+                "margins": {
+                    "top": self.margin_top,
+                    "bottom": self.margin_bottom,
+                    "left": self.margin_left,
+                    "right": self.margin_right,
+                },
+                "orientation": self.orientation,
+            }
             pdf_generator.create_pdf_from_barcodes(
                 selected_barcodes,
                 self.barcode_dir,
                 temp_file_path,
                 title="Печать штрих-кодов",
+                page_settings=page_settings,
             )
 
             self.update_status("Отправка на печать...")
@@ -767,7 +903,9 @@ class PDFPreviewWindow(tk.Toplevel):
             self.doc = fitz.open(self.pdf_path)
             self.total_pages = len(self.doc)
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось открыть PDF-файл:\n{e}", parent=self)
+            messagebox.showerror(
+                "Ошибка", f"Не удалось открыть PDF-файл:\n{e}", parent=self
+            )
             self.destroy()
             return
 
@@ -781,13 +919,17 @@ class PDFPreviewWindow(tk.Toplevel):
         nav_frame = ttk.Frame(self)
         nav_frame.pack(fill="x", padx=10, pady=5)
 
-        self.prev_button = ttk.Button(nav_frame, text="<< Пред.", command=self.prev_page)
+        self.prev_button = ttk.Button(
+            nav_frame, text="<< Пред.", command=self.prev_page
+        )
         self.prev_button.pack(side="left")
 
         self.page_label = ttk.Label(nav_frame, text="Страница 1/1", anchor="center")
         self.page_label.pack(side="left", expand=True, fill="x")
 
-        self.next_button = ttk.Button(nav_frame, text="След. >>", command=self.next_page)
+        self.next_button = ttk.Button(
+            nav_frame, text="След. >>", command=self.next_page
+        )
         self.next_button.pack(side="left")
 
         print_button = ttk.Button(nav_frame, text="Печать", command=self.print_pdf)
@@ -812,9 +954,13 @@ class PDFPreviewWindow(tk.Toplevel):
         self.canvas.create_image(0, 0, anchor="nw", image=self.photo_image)
 
         # Обновляем информацию о странице
-        self.page_label.config(text=f"Страница {self.current_page + 1}/{self.total_pages}")
+        self.page_label.config(
+            text=f"Страница {self.current_page + 1}/{self.total_pages}"
+        )
         self.prev_button.config(state="normal" if self.current_page > 0 else "disabled")
-        self.next_button.config(state="normal" if self.current_page < self.total_pages - 1 else "disabled")
+        self.next_button.config(
+            state="normal" if self.current_page < self.total_pages - 1 else "disabled"
+        )
 
     def prev_page(self):
         if self.current_page > 0:
@@ -832,17 +978,22 @@ class PDFPreviewWindow(tk.Toplevel):
             return
 
         try:
-            win32api.ShellExecute(0, "printto", self.pdf_path, f'"{self.selected_printer}"', ".", 0)
+            win32api.ShellExecute(
+                0, "printto", self.pdf_path, f'"{self.selected_printer}"', ".", 0
+            )
             messagebox.showinfo("Печать", "Документ отправлен на печать.", parent=self)
-            self.on_close() # Закрываем окно после отправки на печать
+            self.on_close()  # Закрываем окно после отправки на печать
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось отправить на печать:\n{e}", parent=self)
+            messagebox.showerror(
+                "Ошибка", f"Не удалось отправить на печать:\n{e}", parent=self
+            )
 
     def on_close(self):
         if self.doc:
             self.doc.close()
         os.remove(self.pdf_path)  # Удаляем временный файл
         self.destroy()
+
 
 if __name__ == "__main__":
     app = BarcodePDFApp()
