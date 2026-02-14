@@ -9,6 +9,8 @@ import win32api
 import win32print
 from PIL import Image, ImageTk
 
+import app_styles
+import barcode_selection_tab
 import pdf_generator
 
 
@@ -54,10 +56,22 @@ class BarcodePDFApp(tk.Tk):
         self.preview_image = None
 
         # --- Создание виджетов ---
+        self.setup_styles()
         self.create_widgets()
 
         # --- Загрузка списка штрих-кодов при запуске ---
         self.load_barcode_list()
+
+    def setup_styles(self):
+        """Настраивает пользовательские стили для ttk виджетов."""
+        style = ttk.Style(self)
+        # Вызываем функцию настройки стилей и получаем палитру
+        colors = app_styles.setup_styles(style)
+
+        # Сохраняем нужные цвета как атрибуты экземпляра для доступа из других методов
+        self.BG_COLOR = colors["BG_COLOR"]
+        self.FG_COLOR = colors["FG_COLOR"]
+        self.FRAME_BG = colors["FRAME_BG"]
 
     def load_config(self):
         """Загружает конфигурацию из файла .ini."""
@@ -113,17 +127,19 @@ class BarcodePDFApp(tk.Tk):
         menubar.add_cascade(label="Справка", menu=help_menu)
 
         # --- Создание вкладок ---
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
-        main_tab = ttk.Frame(notebook)
-        settings_tab = ttk.Frame(notebook)
+        self.main_tab = ttk.Frame(self.notebook)
+        self.selection_tab = barcode_selection_tab.BarcodeSelectionTab(self.notebook, self)
+        settings_tab = ttk.Frame(self.notebook)
 
-        notebook.add(main_tab, text="Главная")
-        notebook.add(settings_tab, text="Настройки")
+        self.notebook.add(self.main_tab, text="Главная")
+        self.notebook.add(self.selection_tab, text="Выбор штрих-кодов")
+        self.notebook.add(settings_tab, text="Настройки")
 
         # --- Заполнение основной вкладки ---
-        self.create_main_tab(main_tab)
+        self.create_main_tab(self.main_tab)
 
         # --- Заполнение вкладки настроек ---
         self.create_settings_tab(settings_tab)
@@ -172,7 +188,7 @@ class BarcodePDFApp(tk.Tk):
         self.quantity_input.grid(row=0, column=3, padx=5, sticky="w")
 
         add_button = ttk.Button(
-            selection_frame, text="Добавить", command=self.add_to_list
+            selection_frame, text="Добавить", command=self.add_to_list, style="Success.TButton"
         )
         add_button.grid(row=0, column=4, padx=(10, 0))
 
@@ -223,25 +239,25 @@ class BarcodePDFApp(tk.Tk):
 
         # --- 3. Кнопки управления списком и генерации ---
         clear_button = ttk.Button(
-            left_panel, text="Убрать все", command=self.clear_list
+            left_panel, text="Убрать все", command=self.clear_list, style="Danger.TButton"
         )
         clear_button.pack(pady=5)
 
         # --- 3. Кнопка "Сгенерировать PDF" ---
         generate_button = ttk.Button(
-            left_panel, text="Сгенерировать PDF", command=self.process_generation
+            left_panel, text="Сгенерировать PDF", command=self.process_generation, style="Success.TButton"
         )
         generate_button.pack(pady=(5, 0))
 
         # --- Новая кнопка "Сгенерировать и печатать" ---
         print_button = ttk.Button(
-            left_panel, text="Сгенерировать и печатать", command=self.process_printing
+            left_panel, text="Сгенерировать и печатать", command=self.process_printing, style="Success.TButton"
         )
         print_button.pack(pady=(5, 10))
 
         # --- Новая кнопка "Предпросмотр PDF" ---
         preview_button = ttk.Button(
-            left_panel, text="Предпросмотр PDF", command=self.process_preview
+            left_panel, text="Предпросмотр PDF", command=self.process_preview, style="TButton"
         )
         preview_button.pack(pady=(0, 10))
 
@@ -249,7 +265,7 @@ class BarcodePDFApp(tk.Tk):
         preview_frame = ttk.LabelFrame(right_panel, text="Предпросмотр", padding=10)
         preview_frame.pack(fill="both", expand=True)
 
-        self.preview_label = ttk.Label(preview_frame, text="Выберите штрих-код")
+        self.preview_label = ttk.Label(preview_frame, text="Выберите штрих-код", background=self.FRAME_BG)
         self.preview_label.pack(fill="both", expand=True)
 
     def create_settings_tab(self, parent_tab):
@@ -416,6 +432,7 @@ class BarcodePDFApp(tk.Tk):
         else:
             self.all_barcode_files = barcode_files
             self.barcode_selector["values"] = self.all_barcode_files
+            self.selection_tab.populate_barcodes(self.all_barcode_files)
             self.barcode_selector.current(0)  # Выбрать первый элемент по умолчанию
             self.show_preview(
                 self.barcode_selector.get()
@@ -536,6 +553,25 @@ class BarcodePDFApp(tk.Tk):
         self.quantity_input.delete(0, tk.END)
         self.quantity_input.insert(0, "1")
         self.barcode_selector.set("")  # Очищаем выбор
+
+    def add_barcodes_from_selection_tab(self, checkbox_vars):
+        """Добавляет штрих-коды, выбранные на вкладке 'Выбор штрих-кодов'."""
+        added_count = 0
+        for filename, var in checkbox_vars.items():
+            if var.get() == 1:  # Если чекбокс отмечен
+                # Добавляем в список с количеством 1, если его там еще нет
+                if filename not in self.selected_for_generation:
+                    self.selected_for_generation[filename] = 1
+                    added_count += 1
+                var.set(0)  # Сбрасываем галочку
+        if added_count > 0:
+            self.update_generation_list_view()
+            self.update_status(f"Добавлено {added_count} новых позиций в список.")
+        self.switch_to_main_tab()
+
+    def switch_to_main_tab(self):
+        """Переключает фокус на главную вкладку."""
+        self.notebook.select(self.main_tab)
 
     def update_preview_from_list(self, event=None):
         """Обновляет превью на основе выбора в Treeview."""
