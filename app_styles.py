@@ -9,18 +9,18 @@ def setup_styles(style: ttk.Style):
 
     # --- Цветовая палитра ---
     colors = {
-        "BG_COLOR": "#2E2E2E",  # Темно-серый фон
-        "FG_COLOR": "#EAEAEA",  # Светлый текст
-        "FRAME_BG": "#3C3C3C",  # Фон для рамок
+        "BG_COLOR": "#FFFFFF",  # Темно-серый фон
+        "FG_COLOR": "#131313",  # Светлый текст
+        "FRAME_BG": "#99CCF0",  # Фон для рамок
         "ACCENT_COLOR": "#007ACC",  # Синий акцент
         "ACCENT_ACTIVE": "#005F9E",  # Синий при наведении/нажатии
         "SUCCESS_COLOR": "#28A745",  # Зеленый для успеха
         "SUCCESS_ACTIVE": "#218838",
         "DANGER_COLOR": "#DC3545",  # Красный для опасности
         "DANGER_ACTIVE": "#C82333",
-        "LIST_HEADER_BG": "#4A4A4A",
-        "LIST_BG": "#555555",
-        "LIST_SELECT_BG": "#007ACC",
+        "LIST_HEADER_BG": "#99CCF0",  # Желтый фон заголовка
+        "LIST_BG": "#FFFFFF",  # Фон для списка
+        "LIST_SELECT_BG": "#007ACC",  # Синий фон при выборе
     }
 
     # --- Общие настройки ---

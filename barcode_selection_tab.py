@@ -18,9 +18,27 @@ class BarcodeSelectionTab(ttk.Frame):
 
     def create_widgets(self):
         """Создает виджеты на вкладке."""
-        # Фрейм для кнопки "Добавить"
+        # --- Нижний фрейм для кнопок управления ---
         bottom_frame = ttk.Frame(self)
         bottom_frame.pack(side="bottom", fill="x", pady=10, padx=10)
+
+        # Фрейм для кнопок "Выбрать все" / "Снять все"
+        selection_buttons_frame = ttk.Frame(bottom_frame)
+        selection_buttons_frame.pack(pady=(0, 5))
+
+        select_all_button = ttk.Button(
+            selection_buttons_frame,
+            text="Выбрать все",
+            command=self.select_all,
+        )
+        select_all_button.pack(side="left", padx=5)
+
+        deselect_all_button = ttk.Button(
+            selection_buttons_frame,
+            text="Снять все",
+            command=self.deselect_all,
+        )
+        deselect_all_button.pack(side="left", padx=5)
 
         add_button = ttk.Button(
             bottom_frame,
@@ -47,6 +65,19 @@ class BarcodeSelectionTab(ttk.Frame):
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        # --- Привязка событий прокрутки колеса мыши ---
+        # Это ключевой момент, которого не хватало.
+        # Мы привязываем событие прокрутки к canvas, чтобы он мог скроллиться.
+        canvas.bind_all(
+            "<MouseWheel>",
+            lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"),
+        )
+        # Также привяжем к самому фрейму, чтобы прокрутка работала, когда курсор над элементами
+        self.scrollable_frame.bind_all(
+            "<MouseWheel>",
+            lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"),
+        )
+
     def populate_barcodes(self, barcode_files):
         """Заполняет фрейм чекбоксами на основе списка файлов."""
         for widget in self.scrollable_frame.winfo_children():
@@ -63,3 +94,13 @@ class BarcodeSelectionTab(ttk.Frame):
         """Добавляет выбранные штрих-коды в основной список генерации."""
         self.app.add_barcodes_from_selection_tab(self.checkbox_vars)
         # self.app.switch_to_main_tab() # Этот вызов теперь находится внутри add_barcodes_from_selection_tab
+
+    def select_all(self):
+        """Отмечает все чекбоксы в списке."""
+        for var in self.checkbox_vars.values():
+            var.set(1)
+
+    def deselect_all(self):
+        """Снимает отметки со всех чекбоксов в списке."""
+        for var in self.checkbox_vars.values():
+            var.set(0)
