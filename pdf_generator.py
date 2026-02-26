@@ -58,6 +58,7 @@ def create_pdf_from_barcodes(
     page_size = landscape(A4) if orientation == "Альбомная" else A4
 
     print("Создание PDF документа...")
+
     c = canvas.Canvas(output_path, pagesize=page_size)
     page_width, page_height = page_size  # Размеры страницы в пунктах (points)
 
