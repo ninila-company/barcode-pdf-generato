@@ -12,6 +12,7 @@ from PIL import Image, ImageTk
 import app_styles
 import barcode_selection_tab
 import pdf_generator
+import ribbon_print_tab
 
 
 class BarcodePDFApp(tk.Tk):
@@ -29,6 +30,7 @@ class BarcodePDFApp(tk.Tk):
         # --- Конфигурация ---
         self.config_file = "config.ini"
         self.barcode_dir = r"barcode_images"  # Значение по умолчанию
+        self.pdf_source_dir = r"pdf_barcodes"  # Новая папка для PDF
         self.selected_printer = None  # Для хранения имени выбранного принтера
         self.load_config()  # Загружаем путь из файла
         # --- Настройки страницы с значениями по умолчанию ---
@@ -81,6 +83,9 @@ class BarcodePDFApp(tk.Tk):
             self.barcode_dir = self.app_config.get(
                 "Settings", "BarcodeDir", fallback=self.barcode_dir
             )
+            self.pdf_source_dir = self.app_config.get(
+                "Settings", "PdfSourceDir", fallback=self.pdf_source_dir
+            )
             self.selected_printer = self.app_config.get(
                 "Settings", "SelectedPrinter", fallback=None
             )
@@ -96,6 +101,7 @@ class BarcodePDFApp(tk.Tk):
         """Сохраняет текущую конфигурацию в файл .ini."""
         self.app_config["Settings"] = {
             "BarcodeDir": self.barcode_dir,
+            "PdfSourceDir": self.pdf_source_dir,
             "SelectedPrinter": self.selected_printer or "",
         }
         self.app_config["PageSettings"] = {
@@ -134,10 +140,14 @@ class BarcodePDFApp(tk.Tk):
         self.selection_tab = barcode_selection_tab.BarcodeSelectionTab(
             self.notebook, self
         )
+        self.ribbon_tab = ribbon_print_tab.RibbonPrintTab(
+            self.notebook, self
+        )
         settings_tab = ttk.Frame(self.notebook)
 
         self.notebook.add(self.main_tab, text="Главная")
         self.notebook.add(self.selection_tab, text="Выбор штрих-кодов")
+        self.notebook.add(self.ribbon_tab, text="Печать с ленты")
         self.notebook.add(settings_tab, text="Настройки")
 
         # --- Заполнение основной вкладки ---
@@ -289,27 +299,46 @@ class BarcodePDFApp(tk.Tk):
 
     def create_settings_tab(self, parent_tab):
         """Создает виджеты для вкладки настроек."""
-        settings_frame = ttk.LabelFrame(
+        image_path_frame = ttk.LabelFrame(
             parent_tab, text="Путь к изображениям", padding=15
         )
-        settings_frame.pack(fill="x", padx=10, pady=10)
+        image_path_frame.pack(fill="x", padx=10, pady=10)
 
-        ttk.Label(settings_frame, text="Папка со штрих-кодами:").grid(
+        ttk.Label(image_path_frame, text="Папка со штрих-кодами:").grid(
             row=0, column=0, sticky="w", pady=(0, 5)
         )
 
-        self.path_entry = ttk.Entry(settings_frame, width=70)
+        self.path_entry = ttk.Entry(image_path_frame, width=70)
         self.path_entry.insert(0, self.barcode_dir)
         self.path_entry.config(state="readonly")
-        self.path_entry.grid(row=1, column=0, sticky="ew")
+        self.path_entry.grid(row=1, column=0, sticky="ew", in_=image_path_frame)
 
         browse_button = ttk.Button(
-            settings_frame, text="Выбрать...", command=self.select_barcode_dir
+            image_path_frame, text="Выбрать...", command=self.select_barcode_dir
         )
-        browse_button.grid(row=1, column=1, sticky="w", padx=(10, 0))
+        browse_button.grid(row=1, column=1, sticky="w", padx=(10, 0), in_=image_path_frame)
 
-        settings_frame.columnconfigure(0, weight=1)
+        image_path_frame.columnconfigure(0, weight=1)
 
+        # --- Фрейм для пути к PDF ---
+        pdf_path_frame = ttk.LabelFrame(
+            parent_tab, text="Путь к PDF-файлам для ленты", padding=15
+        )
+        pdf_path_frame.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(pdf_path_frame, text="Папка с PDF-файлами:").grid(
+            row=0, column=0, sticky="w", pady=(0, 5)
+        )
+        self.pdf_path_entry = ttk.Entry(pdf_path_frame, width=70)
+        self.pdf_path_entry.insert(0, self.pdf_source_dir)
+        self.pdf_path_entry.config(state="readonly")
+        self.pdf_path_entry.grid(row=1, column=0, sticky="ew")
+
+        pdf_browse_button = ttk.Button(
+            pdf_path_frame, text="Выбрать...", command=self.select_pdf_source_dir
+        )
+        pdf_browse_button.grid(row=1, column=1, sticky="w", padx=(10, 0))
+        pdf_path_frame.columnconfigure(0, weight=1)
         # --- Фрейм для настроек принтера ---
         printer_frame = ttk.LabelFrame(parent_tab, text="Настройки печати", padding=15)
         printer_frame.pack(fill="x", padx=10, pady=10)
@@ -452,6 +481,7 @@ class BarcodePDFApp(tk.Tk):
             self.all_barcode_files = barcode_files
             self.barcode_selector["values"] = self.all_barcode_files
             self.selection_tab.populate_barcodes(self.all_barcode_files)
+            self.ribbon_tab.load_pdf_list()  # Загружаем PDF на новой вкладке
             self.barcode_selector.current(0)  # Выбрать первый элемент по умолчанию
             self.show_preview(
                 self.barcode_selector.get()
@@ -514,6 +544,24 @@ class BarcodePDFApp(tk.Tk):
             # Сохраняем и перезагружаем список
             self.save_config()
             self.load_barcode_list()
+
+    def select_pdf_source_dir(self):
+        """Открывает диалог выбора папки для PDF-файлов и обновляет путь."""
+        new_dir = filedialog.askdirectory(
+            title="Выберите папку с PDF-файлами", initialdir=self.pdf_source_dir
+        )
+
+        if new_dir and new_dir != self.pdf_source_dir:
+            self.pdf_source_dir = new_dir
+            self.update_status(f"Новый путь для PDF: {self.pdf_source_dir}")
+
+            self.pdf_path_entry.config(state="normal")
+            self.pdf_path_entry.delete(0, tk.END)
+            self.pdf_path_entry.insert(0, self.pdf_source_dir)
+            self.pdf_path_entry.config(state="readonly")
+
+            self.save_config()
+            self.ribbon_tab.load_pdf_list()  # Обновляем список на вкладке
 
     def filter_barcodes(self, event=None):
         """Фильтрует список в Combobox на основе введенного текста."""

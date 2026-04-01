@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+import fitz  # PyMuPDF
 from PIL import Image
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
@@ -147,3 +148,31 @@ def create_pdf_from_barcodes(
     # --- Сохранение ---
     print("Сохранение PDF...")
     c.save()
+
+
+def merge_pdfs(selected_pdfs: dict, source_dir: str, output_path: str):
+    """
+    Объединяет страницы из нескольких PDF-файлов в один.
+    Использует библиотеку PyMuPDF (fitz), которая уже есть в проекте.
+
+    :param selected_pdfs: Словарь {имя_файла: количество_копий}.
+    :param source_dir: Папка, где лежат исходные PDF-файлы.
+    :param output_path: Путь для сохранения итогового PDF.
+    """
+    result_pdf = fitz.open()  # Создаем новый пустой PDF-документ
+
+    for filename, quantity in selected_pdfs.items():
+        full_path = os.path.join(source_dir, filename)
+        if os.path.exists(full_path):
+            source_pdf = fitz.open(full_path)
+            for _ in range(quantity):
+                result_pdf.insert_pdf(
+                    source_pdf
+                )  # Вставляем все страницы из исходного PDF
+            source_pdf.close()
+
+    if len(result_pdf) == 0:
+        raise ValueError("Не найдено ни одного PDF-файла для объединения.")
+
+    result_pdf.save(output_path)
+    result_pdf.close()
