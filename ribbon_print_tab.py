@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import os
 import tempfile
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
+from typing import Dict, Optional
 
-import fitz  # PyMuPDF
+import fitz
 import win32api
 from PIL import Image, ImageTk
 
@@ -11,18 +15,13 @@ import pdf_generator
 
 
 class RibbonPrintTab(ttk.Frame):
-    """
-    Вкладка для выбора PDF-файлов, их объединения и отправки на ленточный принтер.
-    """
 
-    def __init__(self, parent, app, *args, **kwargs):
+    def __init__(self, parent: ttk.Notebook, app, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
-        self.app = app  # Ссылка на основной класс приложения
-
-        self.all_pdf_files = []
-        self.selected_for_printing = {}  # {имя_файла: количество}
-        self.preview_image = None  # Ссылка на изображение для предпросмотра
-
+        self.app = app
+        self.all_pdf_files: list[str] = []
+        self.selected_for_printing: Dict[str, int] = {}
+        self.preview_image: Optional[ImageTk.PhotoImage] = None
         self.create_widgets()
 
     def create_widgets(self):
@@ -133,7 +132,7 @@ class RibbonPrintTab(ttk.Frame):
         """Загружает список PDF-файлов из указанной директории."""
         self.clear_list(silent=True)
         self.pdf_selector.set("")
-        pdf_dir = self.app.pdf_source_dir
+        pdf_dir = self.app.cfg.pdf_source_dir
 
         if not os.path.isdir(pdf_dir):
             self.all_pdf_files = []
@@ -260,7 +259,7 @@ class RibbonPrintTab(ttk.Frame):
             self.preview_image = None
             return
 
-        filepath = os.path.join(self.app.pdf_source_dir, filename)
+        filepath = os.path.join(self.app.cfg.pdf_source_dir, filename)
         if not os.path.exists(filepath):
             self.preview_label.config(image="", text="Файл не найден")
             self.preview_image = None
@@ -316,32 +315,62 @@ class RibbonPrintTab(ttk.Frame):
             messagebox.showwarning("Внимание", "Список для печати пуст.")
             return
 
-        if not self.app.selected_printer:
+        if not self.app.cfg.selected_printer:
             messagebox.showerror("Ошибка", "Принтер не выбран в Настройках.")
             return
 
         temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
         os.close(temp_fd)
 
-        try:
-            self.app.update_status("Объединение PDF-файлов...")
+        def task():
             pdf_generator.merge_pdfs(
-                self.selected_for_printing, self.app.pdf_source_dir, temp_path
-            )
-
-            self.app.update_status(
-                f"Отправка на принтер {self.app.selected_printer}..."
+                self.selected_for_printing, self.app.cfg.pdf_source_dir, temp_path
             )
             win32api.ShellExecute(
-                0, "printto", temp_path, f'"{self.app.selected_printer}"', ".", 0
+                0, "printto", temp_path, f'"{self.app.cfg.selected_printer}"', ".", 0
             )
-            self.app.update_status("Документ отправлен на печать.")
-            messagebox.showinfo("Готово", "Задание на печать успешно отправлено.")
+            return temp_path
 
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка:\n{e}")
+        def on_done(result):
+            self.app.update_status("Документ отправлен на печать. Готово.")
+            messagebox.showinfo("Готово", "Задание на печать успешно отправлено.")
+            self.app.after(2000, lambda: self._cleanup_temp(temp_path))
+
+        def on_error(error):
+            messagebox.showerror("Ошибка", f"Произошла ошибка:\n{error}")
             self.app.update_status("Ошибка при печати с ленты.")
-        finally:
-            if os.path.exists(temp_path):
-                # Даем небольшую задержку перед удалением, чтобы принтер успел "схватить" файл
-                self.app.after(2000, lambda: os.remove(temp_path))
+            self._cleanup_temp(temp_path)
+
+        self._run_ribbon_task(task, on_done, on_error)
+
+    def _run_ribbon_task(self, task, on_done, on_error):
+        """Запускает задачу в фоновом потоке (аналог _run_task из gui.py)."""
+        self.app.update_status("Объединение PDF-файлов...")
+        self.app.update_idletasks()
+
+        def _wrapper():
+            try:
+                result = task()
+                self.app.after(
+                    0, lambda res=result: self._ribbon_task_completed(on_done, on_error, res, None)
+                )
+            except Exception as exc:
+                self.app.after(
+                    0, lambda err=exc: self._ribbon_task_completed(on_done, on_error, None, err)
+                )
+
+        threading.Thread(target=_wrapper, daemon=True).start()
+
+    def _ribbon_task_completed(self, on_done, on_error, result, error):
+        if error:
+            on_error(error)
+        else:
+            on_done(result)
+
+    @staticmethod
+    def _cleanup_temp(path: str):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass

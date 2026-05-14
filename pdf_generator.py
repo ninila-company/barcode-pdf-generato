@@ -16,15 +16,7 @@ def create_pdf_from_barcodes(
     output_path: str,
     title: Optional[str] = None,
     page_settings: Optional[dict] = None,
-):
-    """
-    Основная функция, реализующая ядро приложения.
-
-    1.  Сбор данных: Принимает словарь {имя_файла: количество} и путь к исходным файлам.
-    2.  Размещение на PDF: Раскладывает изображения по сетке на страницах A4, разделяя группы линией.
-    3.  Сохранение: Сохраняет итоговый PDF.
-    """
-    # Получаем список всех путей к файлам, которые существуют
+) -> None:
     existing_image_paths = [
         os.path.join(source_dir, f)
         for f in selected_barcodes.keys()
@@ -34,20 +26,12 @@ def create_pdf_from_barcodes(
     if not existing_image_paths:
         raise ValueError("Не найдено ни одного файла для размещения в PDF.")
 
-    # --- Регистрация шрифта с поддержкой кириллицы ---
-    # Стандартные шрифты (Helvetica) не поддерживают кириллицу.
-    # Регистрируем шрифт Verdana, который обычно есть в Windows.
     try:
-        # Имя 'Verdana' - это внутренний идентификатор для reportlab
-        # 'Verdana.ttf' - имя файла шрифта в системе
         pdfmetrics.registerFont(TTFont("Verdana", "Verdana.ttf"))
         font_name = "Verdana"
     except Exception:
-        # Если Verdana не найден, возвращаемся к стандартному, но кириллица не будет работать
         font_name = "Helvetica"
 
-    # --- Размещение изображений на PDF-странице ---
-    # Настройки страницы
     if page_settings is None:
         page_settings = {}
 
@@ -58,21 +42,18 @@ def create_pdf_from_barcodes(
 
     page_size = landscape(A4) if orientation == "Альбомная" else A4
 
-    print("Создание PDF документа...")
-
     c = canvas.Canvas(output_path, pagesize=page_size)
-    page_width, page_height = page_size  # Размеры страницы в пунктах (points)
+    page_width, page_height = page_size
 
-    doc_title = title if title else os.path.splitext(os.path.basename(output_path))[0]
+    doc_title = title or os.path.splitext(os.path.basename(output_path))[0]
 
-    def draw_page_header(canvas_obj):
-        """Рисует заголовок вверху страницы."""
+    def draw_page_header(canvas_obj: canvas.Canvas) -> None:
         canvas_obj.setFont(font_name, 12)
         canvas_obj.drawCentredString(
             page_width / 2.0, page_height - margins["top"] * mm + 10 * mm, doc_title
         )
 
-    draw_page_header(c)  # Рисуем заголовок на первой странице
+    draw_page_header(c)
 
     # Задаем размеры и отступы в миллиметрах и конвертируем в пункты
     img_draw_width = 45 * mm
@@ -145,30 +126,18 @@ def create_pdf_from_barcodes(
             c.setLineWidth(0.5)
             c.line(margin_left, line_y_pos, page_width - margin_right, line_y_pos)
 
-    # --- Сохранение ---
-    print("Сохранение PDF...")
     c.save()
 
 
-def merge_pdfs(selected_pdfs: dict, source_dir: str, output_path: str):
-    """
-    Объединяет страницы из нескольких PDF-файлов в один.
-    Использует библиотеку PyMuPDF (fitz), которая уже есть в проекте.
-
-    :param selected_pdfs: Словарь {имя_файла: количество_копий}.
-    :param source_dir: Папка, где лежат исходные PDF-файлы.
-    :param output_path: Путь для сохранения итогового PDF.
-    """
-    result_pdf = fitz.open()  # Создаем новый пустой PDF-документ
+def merge_pdfs(selected_pdfs: dict, source_dir: str, output_path: str) -> None:
+    result_pdf = fitz.open()
 
     for filename, quantity in selected_pdfs.items():
         full_path = os.path.join(source_dir, filename)
         if os.path.exists(full_path):
             source_pdf = fitz.open(full_path)
             for _ in range(quantity):
-                result_pdf.insert_pdf(
-                    source_pdf
-                )  # Вставляем все страницы из исходного PDF
+                result_pdf.insert_pdf(source_pdf)
             source_pdf.close()
 
     if len(result_pdf) == 0:

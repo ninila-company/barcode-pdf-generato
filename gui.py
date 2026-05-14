@@ -1,1101 +1,167 @@
-import configparser
-import os
-import tempfile
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from __future__ import annotations
 
-import fitz  # PyMuPDF
-import win32api
+import os
+import threading
+import tkinter as tk
+from tkinter import messagebox, ttk
+
 import win32print
-from PIL import Image, ImageTk
 
 import app_styles
 import barcode_selection_tab
-import pdf_generator
+import config_manager
+import main_tab
 import ribbon_print_tab
+import settings_tab
 
 
 class BarcodePDFApp(tk.Tk):
-    """
-    Основной класс приложения для генерации PDF со штрих-кодами.
-    """
 
     def __init__(self):
         super().__init__()
 
-        # --- Базовая настройка окна ---
         self.title("Генератор PDF со штрих-кодами")
-        self.geometry("850x600")  # Шире для предпросмотра
+        self.geometry("850x600")
 
-        # --- Конфигурация ---
-        self.config_file = "config.ini"
-        self.barcode_dir = r"barcode_images"  # Значение по умолчанию
-        self.pdf_source_dir = r"pdf_barcodes"  # Новая папка для PDF
-        self.selected_printer = None  # Для хранения имени выбранного принтера
-        self.load_config()  # Загружаем путь из файла
-        # --- Настройки страницы с значениями по умолчанию ---
-        self.margin_top = self.app_config.getint(
-            "PageSettings", "MarginTop", fallback=25
-        )
-        self.margin_bottom = self.app_config.getint(
-            "PageSettings", "MarginBottom", fallback=10
-        )
-        self.margin_left = self.app_config.getint(
-            "PageSettings", "MarginLeft", fallback=10
-        )
-        self.margin_right = self.app_config.getint(
-            "PageSettings", "MarginRight", fallback=10
-        )
-        self.orientation = self.app_config.get(
-            "PageSettings", "Orientation", fallback="Книжная"
-        )
+        self.cfg = config_manager.AppConfig.load()
+        if not self.cfg.selected_printer:
+            try:
+                self.cfg.selected_printer = win32print.GetDefaultPrinter()
+            except RuntimeError:
+                self.cfg.selected_printer = None
 
-        # Словарь для хранения выбранных для генерации файлов {имя_файла: количество}
-        self.selected_for_generation = {}
-        # Список для хранения всех найденных файлов для поиска
-        self.all_barcode_files = []
-        # Ссылка на изображение для предпросмотра, чтобы его не удалил сборщик мусора
-        self.preview_image = None
-
-        # --- Создание виджетов ---
         self.setup_styles()
         self.create_widgets()
-
-        # --- Загрузка списка штрих-кодов при запуске ---
         self.load_barcode_list()
 
     def setup_styles(self):
-        """Настраивает пользовательские стили для ttk виджетов."""
         style = ttk.Style(self)
-        # Вызываем функцию настройки стилей и получаем палитру
         colors = app_styles.setup_styles(style)
-
-        # Сохраняем нужные цвета как атрибуты экземпляра для доступа из других методов
         self.BG_COLOR = colors["BG_COLOR"]
         self.FG_COLOR = colors["FG_COLOR"]
         self.FRAME_BG = colors["FRAME_BG"]
 
-    def load_config(self):
-        """Загружает конфигурацию из файла .ini."""
-        self.app_config = configparser.ConfigParser()
-        if os.path.exists(self.config_file):
-            self.app_config.read(self.config_file, encoding="utf-8")
-            self.barcode_dir = self.app_config.get(
-                "Settings", "BarcodeDir", fallback=self.barcode_dir
-            )
-            self.pdf_source_dir = self.app_config.get(
-                "Settings", "PdfSourceDir", fallback=self.pdf_source_dir
-            )
-            self.selected_printer = self.app_config.get(
-                "Settings", "SelectedPrinter", fallback=None
-            )
-
-        # Если принтер не был сохранен в конфиге, пытаемся получить принтер по умолчанию
-        if not self.selected_printer:
-            try:
-                self.selected_printer = win32print.GetDefaultPrinter()
-            except RuntimeError:  # Ошибка, если принтеры не установлены
-                self.selected_printer = None
-
     def save_config(self):
-        """Сохраняет текущую конфигурацию в файл .ini."""
-        self.app_config["Settings"] = {
-            "BarcodeDir": self.barcode_dir,
-            "PdfSourceDir": self.pdf_source_dir,
-            "SelectedPrinter": self.selected_printer or "",
-        }
-        self.app_config["PageSettings"] = {
-            "MarginTop": str(self.margin_top),
-            "MarginBottom": str(self.margin_bottom),
-            "MarginLeft": str(self.margin_left),
-            "MarginRight": str(self.margin_right),
-            "Orientation": self.orientation,
-        }
-        with open(self.config_file, "w", encoding="utf-8") as configfile:
-            self.app_config.write(configfile)
+        self.cfg.save()
 
     def create_widgets(self):
-        """
-        Создает все основные элементы интерфейса.
-        """
-        # --- Создание верхнего меню ---
         menubar = tk.Menu(self)
         self.config(menu=menubar)
 
-        # Меню "Файл"
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Выход", command=self.destroy)
         menubar.add_cascade(label="Файл", menu=file_menu)
 
-        # Меню "Справка"
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="О программе", command=self.show_about_dialog)
         menubar.add_cascade(label="Справка", menu=help_menu)
 
-        # --- Создание вкладок ---
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.main_tab = ttk.Frame(self.notebook)
+        self.main_tab = main_tab.MainTab(self.notebook, self)
         self.selection_tab = barcode_selection_tab.BarcodeSelectionTab(
             self.notebook, self
         )
-        self.ribbon_tab = ribbon_print_tab.RibbonPrintTab(
-            self.notebook, self
-        )
-        settings_tab = ttk.Frame(self.notebook)
+        self.ribbon_tab = ribbon_print_tab.RibbonPrintTab(self.notebook, self)
+        self.settings_tab = settings_tab.SettingsTab(self.notebook, self)
 
         self.notebook.add(self.main_tab, text="Главная")
         self.notebook.add(self.selection_tab, text="Выбор штрих-кодов")
         self.notebook.add(self.ribbon_tab, text="Печать с ленты")
-        self.notebook.add(settings_tab, text="Настройки")
+        self.notebook.add(self.settings_tab, text="Настройки")
 
-        # --- Заполнение основной вкладки ---
-        self.create_main_tab(self.main_tab)
-
-        # --- Заполнение вкладки настроек ---
-        self.create_settings_tab(settings_tab)
-
-        # --- 5. Статус-бар ---
         self.status_bar = ttk.Label(
             self, text="Загрузка...", anchor="w", relief=tk.SUNKEN
         )
         self.status_bar.pack(side="bottom", fill="x", padx=10, pady=(0, 5))
 
-    def create_main_tab(self, parent_tab):
-        """Создает виджеты для основной вкладки."""
-        main_frame = ttk.Frame(parent_tab)
-        main_frame.pack(fill="both", expand=True)
-
-        left_panel = ttk.Frame(main_frame)
-        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
-
-        right_panel = ttk.Frame(main_frame)
-        right_panel.pack(side="right", fill="y", expand=False)
-
-        # --- 1. Фрейм для выбора штрих-кода ---
-        selection_frame = ttk.LabelFrame(
-            left_panel, text="Шаг 1: Выбор штрих-кода", padding=(10, 5)
-        )
-        selection_frame.pack(fill="x", pady=(0, 5))
-
-        ttk.Label(selection_frame, text="Штрих-код:").grid(
-            row=0, column=0, padx=(0, 5), sticky="w"
-        )
-        self.barcode_selector = ttk.Combobox(
-            selection_frame, state="normal", width=30, height=20
-        )
-        self.barcode_selector.grid(row=0, column=1, padx=5, sticky="ew")
-        # Обновляем предпросмотр при выборе из списка
-        self.barcode_selector.bind(
-            "<<ComboboxSelected>>", self.update_preview_from_combobox
-        )
-        self.barcode_selector.bind("<KeyRelease>", self.filter_barcodes)
-
-        ttk.Label(selection_frame, text="Кол-во:").grid(
-            row=0, column=2, padx=(10, 5), sticky="w"
-        )
-        self.quantity_input = ttk.Entry(selection_frame, width=8)
-        self.quantity_input.insert(0, "1")
-        self.quantity_input.grid(row=0, column=3, padx=5, sticky="w")
-
-        add_button = ttk.Button(
-            selection_frame,
-            text="Добавить",
-            command=self.add_to_list,
-            style="Success.TButton",
-        )
-        add_button.grid(row=0, column=4, padx=(10, 0))
-
-        selection_frame.columnconfigure(1, weight=1)
-
-        # --- 2. Фрейм для списка на генерацию ---
-        list_frame = ttk.LabelFrame(
-            left_panel, text="Шаг 2: Список для генерации PDF", padding=(10, 5)
-        )
-        list_frame.pack(fill="both", expand=True, pady=5)
-
-        columns = ("filename", "quantity", "delete")
-        self.generation_list_view = ttk.Treeview(
-            list_frame, columns=columns, show="headings"
-        )
-        self.generation_list_view.heading("filename", text="Имя файла")
-        self.generation_list_view.heading("quantity", text="Количество")
-        self.generation_list_view.heading("delete", text="Удалить")
-        self.generation_list_view.column("quantity", width=100, anchor="center")
-        self.generation_list_view.column("delete", width=60, anchor="center")
-
-        # Добавляем скроллбар
-        scrollbar = ttk.Scrollbar(
-            list_frame, orient="vertical", command=self.generation_list_view.yview
-        )
-        self.generation_list_view.configure(yscrollcommand=scrollbar.set)
-
-        self.generation_list_view.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # Фрейм для итогового счетчика
-        total_frame = ttk.Frame(list_frame)
-        total_frame.pack(fill="x", side="bottom", pady=(5, 0))
-        self.total_count_label = ttk.Label(total_frame, text="Всего для печати: 0")
-        self.total_count_label.pack(side="right")
-
-        # Привязываем событие клика к новому методу
-        self.generation_list_view.bind("<ButtonPress-1>", self.on_drag_start)
-        self.generation_list_view.bind("<B1-Motion>", self.on_drag_motion)
-        self.generation_list_view.bind("<ButtonRelease-1>", self.on_drag_release)
-
-        # Обновляем предпросмотр при выборе из списка
-        self.generation_list_view.bind(
-            "<<TreeviewSelect>>", self.update_preview_from_list
-        )
-        # Привязываем событие двойного клика для редактирования
-        self.generation_list_view.bind("<Double-1>", self.edit_list_item)
-
-        # --- 3. Кнопки управления списком и генерации ---
-        clear_button = ttk.Button(
-            left_panel,
-            text="Убрать все",
-            command=self.clear_list,
-            style="Danger.TButton",
-        )
-        clear_button.pack(pady=5)
-
-        # --- 3. Кнопка "Сгенерировать PDF" ---
-        generate_button = ttk.Button(
-            left_panel,
-            text="Сгенерировать PDF",
-            command=self.process_generation,
-            style="Success.TButton",
-        )
-        generate_button.pack(pady=(5, 0))
-
-        # --- Новая кнопка "Сгенерировать и печатать" ---
-        print_button = ttk.Button(
-            left_panel,
-            text="Сгенерировать и печатать",
-            command=self.process_printing,
-            style="Success.TButton",
-        )
-        print_button.pack(pady=(5, 10))
-
-        # --- Новая кнопка "Предпросмотр PDF" ---
-        preview_button = ttk.Button(
-            left_panel,
-            text="Предпросмотр PDF",
-            command=self.process_preview,
-            style="TButton",
-        )
-        preview_button.pack(pady=(0, 10))
-
-        # --- 4. Фрейм для предпросмотра ---
-        preview_frame = ttk.LabelFrame(right_panel, text="Предпросмотр", padding=10)
-        preview_frame.pack(fill="both", expand=True)
-
-        self.preview_label = ttk.Label(
-            preview_frame, text="Выберите штрих-код", background=self.FRAME_BG
-        )
-        self.preview_label.pack(fill="both", expand=True)
-
-    def create_settings_tab(self, parent_tab):
-        """Создает виджеты для вкладки настроек."""
-        image_path_frame = ttk.LabelFrame(
-            parent_tab, text="Путь к изображениям", padding=15
-        )
-        image_path_frame.pack(fill="x", padx=10, pady=10)
-
-        ttk.Label(image_path_frame, text="Папка со штрих-кодами:").grid(
-            row=0, column=0, sticky="w", pady=(0, 5)
-        )
-
-        self.path_entry = ttk.Entry(image_path_frame, width=70)
-        self.path_entry.insert(0, self.barcode_dir)
-        self.path_entry.config(state="readonly")
-        self.path_entry.grid(row=1, column=0, sticky="ew", in_=image_path_frame)
-
-        browse_button = ttk.Button(
-            image_path_frame, text="Выбрать...", command=self.select_barcode_dir
-        )
-        browse_button.grid(row=1, column=1, sticky="w", padx=(10, 0), in_=image_path_frame)
-
-        image_path_frame.columnconfigure(0, weight=1)
-
-        # --- Фрейм для пути к PDF ---
-        pdf_path_frame = ttk.LabelFrame(
-            parent_tab, text="Путь к PDF-файлам для ленты", padding=15
-        )
-        pdf_path_frame.pack(fill="x", padx=10, pady=5)
-
-        ttk.Label(pdf_path_frame, text="Папка с PDF-файлами:").grid(
-            row=0, column=0, sticky="w", pady=(0, 5)
-        )
-        self.pdf_path_entry = ttk.Entry(pdf_path_frame, width=70)
-        self.pdf_path_entry.insert(0, self.pdf_source_dir)
-        self.pdf_path_entry.config(state="readonly")
-        self.pdf_path_entry.grid(row=1, column=0, sticky="ew")
-
-        pdf_browse_button = ttk.Button(
-            pdf_path_frame, text="Выбрать...", command=self.select_pdf_source_dir
-        )
-        pdf_browse_button.grid(row=1, column=1, sticky="w", padx=(10, 0))
-        pdf_path_frame.columnconfigure(0, weight=1)
-        # --- Фрейм для настроек принтера ---
-        printer_frame = ttk.LabelFrame(parent_tab, text="Настройки печати", padding=15)
-        printer_frame.pack(fill="x", padx=10, pady=10)
-
-        ttk.Label(printer_frame, text="Принтер:").grid(
-            row=0, column=0, sticky="w", pady=(0, 5)
-        )
-
-        self.printer_selector = ttk.Combobox(printer_frame, state="readonly", width=68)
-        self.printer_selector.grid(row=1, column=0, sticky="ew")
-        self.printer_selector.bind("<<ComboboxSelected>>", self.on_printer_select)
-
-        printer_frame.columnconfigure(0, weight=1)
-
-        self.load_printers()
-
-        # --- Фрейм для настроек страницы ---
-        page_settings_frame = ttk.LabelFrame(
-            parent_tab, text="Настройки страницы (мм)", padding=15
-        )
-        page_settings_frame.pack(fill="x", padx=10, pady=10)
-
-        # Поля
-        ttk.Label(page_settings_frame, text="Верхнее:").grid(
-            row=0, column=0, sticky="w"
-        )
-        self.margin_top_entry = ttk.Entry(page_settings_frame, width=10)
-        self.margin_top_entry.grid(row=0, column=1, sticky="w", padx=5)
-        self.margin_top_entry.insert(0, str(self.margin_top))
-
-        ttk.Label(page_settings_frame, text="Нижнее:").grid(
-            row=0, column=2, sticky="w", padx=(10, 0)
-        )
-        self.margin_bottom_entry = ttk.Entry(page_settings_frame, width=10)
-        self.margin_bottom_entry.grid(row=0, column=3, sticky="w", padx=5)
-        self.margin_bottom_entry.insert(0, str(self.margin_bottom))
-
-        ttk.Label(page_settings_frame, text="Левое:").grid(
-            row=1, column=0, sticky="w", pady=(5, 0)
-        )
-        self.margin_left_entry = ttk.Entry(page_settings_frame, width=10)
-        self.margin_left_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(5, 0))
-        self.margin_left_entry.insert(0, str(self.margin_left))
-
-        ttk.Label(page_settings_frame, text="Правое:").grid(
-            row=1, column=2, sticky="w", padx=(10, 0), pady=(5, 0)
-        )
-        self.margin_right_entry = ttk.Entry(page_settings_frame, width=10)
-        self.margin_right_entry.grid(row=1, column=3, sticky="w", padx=5, pady=(5, 0))
-        self.margin_right_entry.insert(0, str(self.margin_right))
-
-        # Ориентация
-        ttk.Label(page_settings_frame, text="Ориентация:").grid(
-            row=2, column=0, sticky="w", pady=(10, 0)
-        )
-        self.orientation_selector = ttk.Combobox(
-            page_settings_frame, state="readonly", values=["Книжная", "Альбомная"]
-        )
-        self.orientation_selector.grid(
-            row=2, column=1, columnspan=3, sticky="ew", pady=(10, 0)
-        )
-        self.orientation_selector.set(self.orientation)
-
-        # Привязка событий для сохранения
-        self.margin_top_entry.bind("<FocusOut>", self.on_page_settings_change)
-        self.margin_bottom_entry.bind("<FocusOut>", self.on_page_settings_change)
-        self.margin_left_entry.bind("<FocusOut>", self.on_page_settings_change)
-        self.margin_right_entry.bind("<FocusOut>", self.on_page_settings_change)
-        self.orientation_selector.bind(
-            "<<ComboboxSelected>>", self.on_page_settings_change
-        )
-
-    def on_page_settings_change(self, event=None):
-        """Сохраняет настройки страницы при их изменении."""
-        try:
-            self.margin_top = int(self.margin_top_entry.get())
-            self.margin_bottom = int(self.margin_bottom_entry.get())
-            self.margin_left = int(self.margin_left_entry.get())
-            self.margin_right = int(self.margin_right_entry.get())
-            self.orientation = self.orientation_selector.get()
-            self.save_config()
-            self.update_status("Настройки страницы сохранены.")
-        except ValueError:
-            messagebox.showerror(
-                "Ошибка ввода", "Значения полей должны быть целыми числами."
-            )
-            # Можно вернуть старые значения для наглядности
-
-    def load_printers(self):
-        """Загружает список доступных принтеров в Combobox."""
-        printers = [
-            p[2]
-            for p in win32print.EnumPrinters(
-                win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
-            )
-        ]
-        self.printer_selector["values"] = printers
-        if self.selected_printer in printers:
-            self.printer_selector.set(self.selected_printer)
-        elif printers:
-            self.printer_selector.current(0)
-            self.selected_printer = self.printer_selector.get()
-
     def load_barcode_list(self):
-        """
-        Сканирует папку barcode_images и заполняет выпадающий список.
-        """
-        # Очищаем старые данные перед загрузкой новых
-        self.clear_list(silent=True)
-        self.barcode_selector.set("")
+        self.main_tab.clear_list(silent=True)
+        self.main_tab.barcode_selector.set("")
 
-        if not os.path.isdir(self.barcode_dir):
+        if not os.path.isdir(self.cfg.barcode_dir):
             messagebox.showwarning(
                 "Папка не найдена",
-                f"Папка '{self.barcode_dir}' не найдена.\n\n"
+                f"Папка '{self.cfg.barcode_dir}' не найдена.\n\n"
                 "Пожалуйста, укажите правильный путь на вкладке 'Настройки'.",
             )
-            self.barcode_selector["values"] = []
-            self.all_barcode_files = []
+            self.main_tab.barcode_selector["values"] = []
+            self.main_tab.all_barcode_files = []
             self.update_status("Ошибка: неверный путь к папке со штрих-кодами.")
             return
 
-        # Получаем список файлов-изображений
         barcode_files = sorted(
-            [
-                f
-                for f in os.listdir(self.barcode_dir)
-                if f.lower().endswith((".png", ".jpg", ".jpeg"))
-            ]
+            f
+            for f in os.listdir(self.cfg.barcode_dir)
+            if f.lower().endswith((".png", ".jpg", ".jpeg"))
         )
 
         if not barcode_files:
             messagebox.showwarning(
-                "Внимание", f"В папке '{self.barcode_dir}' не найдено изображений."
+                "Внимание",
+                f"В папке '{self.cfg.barcode_dir}' не найдено изображений.",
             )
-            self.barcode_selector["values"] = []
-            self.all_barcode_files = []
+            self.main_tab.barcode_selector["values"] = []
+            self.main_tab.all_barcode_files = []
             self.update_status("Внимание: Изображения не найдены.")
         else:
-            self.all_barcode_files = barcode_files
-            self.barcode_selector["values"] = self.all_barcode_files
-            self.selection_tab.populate_barcodes(self.all_barcode_files)
-            self.ribbon_tab.load_pdf_list()  # Загружаем PDF на новой вкладке
-            self.barcode_selector.current(0)  # Выбрать первый элемент по умолчанию
-            self.show_preview(
-                self.barcode_selector.get()
-            )  # Показать превью первого элемента
+            self.main_tab.set_barcodes(barcode_files)
+            self.selection_tab.populate_barcodes(barcode_files)
+            self.ribbon_tab.load_pdf_list()
             self.update_status("Готово")
 
-    def show_preview(self, filename):
-        """Отображает изображение штрих-кода в области предпросмотра."""
-        if not filename:
-            # Очищаем предпросмотр, если имя файла не передано
-            self.preview_label.config(image="", text="Выберите штрих-код")
-            self.preview_image = None
-            return
-
-        filepath = os.path.join(self.barcode_dir, filename)
-        if not os.path.exists(filepath):
-            self.preview_label.config(image="", text="Файл не найден")
-            self.preview_image = None
-            return
-
-        try:
-            # Открываем изображение и масштабируем его для предпросмотра
-            img = Image.open(filepath)
-
-            # Задаем максимальную ширину для предпросмотра
-            max_width = 250
-            w_percent = max_width / float(img.size[0])
-            h_size = int((float(img.size[1]) * float(w_percent)))
-            img = img.resize((max_width, h_size), Image.Resampling.LANCZOS)
-
-            # Создаем PhotoImage и сохраняем на него ссылку
-            self.preview_image = ImageTk.PhotoImage(img)
-            self.preview_label.config(image=self.preview_image, text="")
-        except Exception as e:
-            print(f"Ошибка загрузки превью: {e}")
-            self.preview_label.config(image="", text="Ошибка\nзагрузки")
-            self.preview_image = None
-
-    def update_preview_from_combobox(self, event=None):
-        """Обновляет превью на основе выбора в Combobox."""
-        selected_file = self.barcode_selector.get()
-        self.show_preview(selected_file)
-
-    def select_barcode_dir(self):
-        """Открывает диалог выбора папки и обновляет путь."""
-        new_dir = filedialog.askdirectory(
-            title="Выберите папку со штрих-кодами", initialdir=self.barcode_dir
-        )
-
-        if new_dir and new_dir != self.barcode_dir:
-            self.barcode_dir = new_dir
-            self.update_status(f"Новый путь: {self.barcode_dir}")
-
-            # Обновляем поле ввода в настройках
-            self.path_entry.config(state="normal")
-            self.path_entry.delete(0, tk.END)
-            self.path_entry.insert(0, self.barcode_dir)
-            self.path_entry.config(state="readonly")
-
-            # Сохраняем и перезагружаем список
-            self.save_config()
-            self.load_barcode_list()
-
-    def select_pdf_source_dir(self):
-        """Открывает диалог выбора папки для PDF-файлов и обновляет путь."""
-        new_dir = filedialog.askdirectory(
-            title="Выберите папку с PDF-файлами", initialdir=self.pdf_source_dir
-        )
-
-        if new_dir and new_dir != self.pdf_source_dir:
-            self.pdf_source_dir = new_dir
-            self.update_status(f"Новый путь для PDF: {self.pdf_source_dir}")
-
-            self.pdf_path_entry.config(state="normal")
-            self.pdf_path_entry.delete(0, tk.END)
-            self.pdf_path_entry.insert(0, self.pdf_source_dir)
-            self.pdf_path_entry.config(state="readonly")
-
-            self.save_config()
-            self.ribbon_tab.load_pdf_list()  # Обновляем список на вкладке
-
-    def filter_barcodes(self, event=None):
-        """Фильтрует список в Combobox на основе введенного текста."""
-        search_term = self.barcode_selector.get().lower()
-
-        if not search_term:
-            # Если поле поиска пустое, показываем все штрих-коды
-            self.barcode_selector["values"] = self.all_barcode_files
-            return
-
-        # Фильтруем список
-        filtered_files = [f for f in self.all_barcode_files if search_term in f.lower()]
-        self.barcode_selector["values"] = filtered_files
-
-    def on_printer_select(self, event=None):
-        """Сохраняет выбранный принтер в конфигурацию."""
-        self.selected_printer = self.printer_selector.get()
-        self.save_config()
-        self.update_status(f"Принтер по умолчанию изменен на: {self.selected_printer}")
-
-    def add_to_list(self):
-        """Добавляет выбранный штрих-код и количество в список для генерации."""
-        filename = self.barcode_selector.get()
-        if not filename:
-            messagebox.showwarning(
-                "Внимание", "Пожалуйста, выберите штрих-код из списка."
-            )
-            return
-
-        try:
-            quantity = int(self.quantity_input.get())
-            if quantity <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror(
-                "Ошибка", "Количество должно быть целым положительным числом."
-            )
-            return
-
-        # Проверяем, что выбранный файл действительно существует в исходном списке
-        if filename not in self.all_barcode_files:
-            messagebox.showwarning(
-                "Внимание",
-                f"Файл '{filename}' не найден в списке. Выберите корректный файл.",
-            )
-            return
-
-        # Добавляем или обновляем значение в словаре
-        self.selected_for_generation[filename] = quantity
-
-        # Обновляем Treeview
-        self.update_generation_list_view()
-        self.update_status(f"Добавлен: {filename}")
-
-        # Сбрасываем поля для удобства
-        self.quantity_input.delete(0, tk.END)
-        self.quantity_input.insert(0, "1")
-        self.barcode_selector.set("")  # Очищаем выбор
-
     def add_barcodes_from_selection_tab(self, checkbox_vars):
-        """Добавляет штрих-коды, выбранные на вкладке 'Выбор штрих-кодов'."""
-        added_count = 0
-        for filename, var in checkbox_vars.items():
-            if var.get() == 1:  # Если чекбокс отмечен
-                # Добавляем в список с количеством 1, если его там еще нет
-                if filename not in self.selected_for_generation:
-                    self.selected_for_generation[filename] = 1
-                    added_count += 1
-                var.set(0)  # Сбрасываем галочку
-        if added_count > 0:
-            self.update_generation_list_view()
-            self.update_status(f"Добавлено {added_count} новых позиций в список.")
-        self.switch_to_main_tab()
-
-    def switch_to_main_tab(self):
-        """Переключает фокус на главную вкладку."""
-        self.notebook.select(self.main_tab)
-
-    def update_preview_from_list(self, event=None):
-        """Обновляет превью на основе выбора в Treeview."""
-        selected_items = self.generation_list_view.selection()
-        if not selected_items:
-            return
-
-        item_id = selected_items[0]  # Берем первый выделенный элемент
-        filename = self.generation_list_view.item(item_id, "values")[0]
-        self.show_preview(filename)
-
-    def handle_list_click(self, event):
-        """Обрабатывает клик по списку для удаления отдельной строки."""
-        column_id = self.generation_list_view.identify_column(event.x)
-        # Проверяем, что клик был по третьему столбцу (индекс #3)
-        if column_id == "#3":
-            item_id = self.generation_list_view.identify_row(event.y)
-            if item_id:
-                # Получаем имя файла из строки
-                filename = self.generation_list_view.item(item_id, "values")[0]
-                if filename in self.selected_for_generation:
-                    del self.selected_for_generation[filename]
-                    self.update_generation_list_view()
-
-    def edit_list_item(self, event):
-        """Обрабатывает двойной клик для редактирования количества."""
-        item_id = self.generation_list_view.identify_row(event.y)
-        column_id = self.generation_list_view.identify_column(event.x)
-
-        # Редактируем только столбец "Количество" (индекс #2)
-        if not item_id or column_id != "#2":
-            return
-
-        # Получаем координаты ячейки
-        x, y, width, height = self.generation_list_view.bbox(item_id, column_id)
-
-        # Создаем временное поле для ввода
-        current_value = self.generation_list_view.item(item_id, "values")[1]
-        entry = ttk.Entry(self.generation_list_view)
-        entry.place(x=x, y=y, width=width, height=height)
-        entry.insert(0, current_value)
-        entry.focus_set()
-
-        # Привязываем события для сохранения значения
-        entry.bind(
-            "<FocusOut>",
-            lambda e: self.save_edited_quantity(e, entry, item_id),
-        )
-        entry.bind(
-            "<Return>",
-            lambda e: self.save_edited_quantity(e, entry, item_id),
-        )
-
-    def save_edited_quantity(self, event, entry_widget, item_id):
-        """Сохраняет новое значение количества и уничтожает поле ввода."""
-        new_value_str = entry_widget.get()
-
-        try:
-            new_quantity = int(new_value_str)
-            if new_quantity <= 0:
-                raise ValueError("Количество должно быть положительным")
-
-            # Получаем имя файла из строки
-            filename = self.generation_list_view.item(item_id, "values")[0]
-
-            # Обновляем значение в нашем основном словаре
-            if filename in self.selected_for_generation:
-                self.selected_for_generation[filename] = new_quantity
-                self.update_status(f"Количество для '{filename}' обновлено")
-
-            # Обновляем весь список
-            self.update_generation_list_view()
-
-        except ValueError:
-            messagebox.showerror(
-                "Ошибка ввода", "Количество должно быть целым положительным числом."
-            )
-            # Не обновляем список, чтобы пользователь видел ошибку
-
-        finally:
-            # Уничтожаем временное поле ввода в любом случае
-            entry_widget.destroy()
-
-    def clear_list(self, silent=False):
-        """Полностью очищает список для генерации."""
-        if not self.selected_for_generation:
-            return  # Ничего не делаем, если список уже пуст
-
-        self.selected_for_generation.clear()
-        self.update_generation_list_view()
-        if not silent:
-            self.update_status("Список очищен. Готово")
-        self.show_preview(None)  # Очищаем предпросмотр
-
-    def on_drag_start(self, event):
-        """Запоминает выбранный для перетаскивания элемент."""
-        # Сначала проверяем, не был ли это клик для удаления
-        column_id = self.generation_list_view.identify_column(event.x)
-        if column_id == "#3":
-            self.handle_list_click(event)
-            return "break"  # Прерываем дальнейшую обработку, чтобы не начать drag
-
-        # Если это не удаление, начинаем перетаскивание
-        if self.generation_list_view.identify_row(event.y):
-            self.generation_list_view.selection_set(
-                self.generation_list_view.identify_row(event.y)
-            )
-
-    def on_drag_motion(self, event):
-        """Перемещает элемент в списке во время движения мыши."""
-        if not self.generation_list_view.selection():
-            return
-
-        moveto_item = self.generation_list_view.identify_row(event.y)
-        if moveto_item:
-            self.generation_list_view.move(
-                self.generation_list_view.selection()[0],
-                "",
-                self.generation_list_view.index(moveto_item),
-            )
-
-    def on_drag_release(self, event):
-        """Обновляет порядок в словаре данных после перетаскивания."""
-        new_order = self.generation_list_view.get_children()
-        new_selected = {
-            self.generation_list_view.item(item, "values")[
-                0
-            ]: self.selected_for_generation[
-                self.generation_list_view.item(item, "values")[0]
-            ]
-            for item in new_order
-        }
-        self.selected_for_generation = new_selected
-        self.update_status("Порядок элементов изменен")
+        added = self.main_tab.add_barcodes_from_selection(checkbox_vars)
+        if added > 0:
+            self.update_status(f"Добавлено {added} новых позиций в список.")
+        self.main_tab.switch_to_main_tab()
 
     def update_status(self, message):
-        """Обновляет текст в статус-баре."""
         self.status_bar.config(text=message)
         self.update_idletasks()
 
+    def _run_task(
+        self,
+        task: callable,
+        on_done: callable,
+        on_error: callable,
+        status_text: str = "Выполнение...",
+    ):
+        self.attributes("-disabled", True)
+        self.update_status(status_text)
+        self.update_idletasks()
+
+        def _wrapper():
+            try:
+                result = task()
+                self.after(
+                    0, lambda res=result: self._task_completed(on_done, on_error, res, None)
+                )
+            except Exception as exc:
+                self.after(
+                    0, lambda err=exc: self._task_completed(on_done, on_error, None, err)
+                )
+
+        threading.Thread(target=_wrapper, daemon=True).start()
+
+    def _task_completed(
+        self, on_done: callable, on_error: callable, result, error: Exception | None
+    ):
+        self.attributes("-disabled", False)
+        self.focus_set()
+        if error:
+            on_error(error)
+        else:
+            on_done(result)
+
     def show_about_dialog(self):
-        """Показывает диалоговое окно "О программе"."""
         messagebox.showinfo(
             "О программе",
             "Генератор PDF со штрих-кодами\n\n"
             "Версия: 1.1\n\n"
             "Приложение для удобного создания PDF-документов из изображений штрих-кодов.",
         )
-
-    def update_total_count(self):
-        """Подсчитывает и обновляет общее количество штрих-кодов для печати."""
-        total_quantity = sum(self.selected_for_generation.values())
-        self.total_count_label.config(text=f"Всего для печати: {total_quantity}")
-
-    def update_generation_list_view(self):
-        """Обновляет виджет Treeview на основе данных из словаря."""
-        # Очищаем старые записи
-        for i in self.generation_list_view.get_children():
-            self.generation_list_view.delete(i)
-
-        # Добавляем новые из словаря
-        for filename, quantity in self.selected_for_generation.items():
-            self.generation_list_view.insert(
-                "", tk.END, values=(filename, quantity, "❌")
-            )
-
-        # Обновляем общий счетчик
-        self.update_total_count()
-
-    def process_generation(self):
-        """
-        Обрабатывает нажатие на кнопку "Сгенерировать PDF".
-        """
-        # Теперь данные берутся из self.selected_for_generation
-        selected_barcodes = self.selected_for_generation
-
-        if not selected_barcodes:
-            messagebox.showwarning(
-                "Внимание",
-                "Список для генерации пуст. Добавьте хотя бы один штрих-код.",
-            )
-            return
-
-        print("Выбранные штрих-коды для генерации:", selected_barcodes)
-
-        # --- Диалог сохранения файла ---
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".pdf",
-            filetypes=[("PDF Documents", "*.pdf"), ("All Files", "*.*")],
-            title="Сохранить PDF файл как...",
-        )
-
-        if not file_path:
-            # Пользователь нажал "Отмена" в диалоге сохранения
-            print("Генерация отменена пользователем.")
-            self.update_status("Генерация отменена. Готово")
-            return
-
-        # --- Вызов реальной логики генерации PDF ---
-        try:
-            # Временно блокируем окно, чтобы пользователь не мог ничего нажать во время генерации
-            self.attributes("-disabled", True)
-            self.update_status("Генерация PDF...")
-            self.update_idletasks()  # Обновляем интерфейс
-
-            page_settings = {
-                "margins": {
-                    "top": self.margin_top,
-                    "bottom": self.margin_bottom,
-                    "left": self.margin_left,
-                    "right": self.margin_right,
-                },
-                "orientation": self.orientation,
-            }
-            pdf_generator.create_pdf_from_barcodes(
-                selected_barcodes,
-                self.barcode_dir,
-                file_path,
-                title=os.path.splitext(os.path.basename(file_path))[0],
-                page_settings=page_settings,
-            )
-
-            messagebox.showinfo(
-                "Готово",
-                f"PDF-файл успешно создан и сохранен как:\n{os.path.basename(file_path)}",
-            )
-            self.update_status(
-                f"PDF-файл успешно создан: {os.path.basename(file_path)}"
-            )
-        except Exception as e:
-            # Отлавливаем любые ошибки из модуля генерации и сообщаем пользователю
-            print(f"Ошибка при создании PDF: {e}")
-            messagebox.showerror("Ошибка генерации", f"Произошла ошибка:\n{e}")
-            self.update_status("Ошибка при генерации PDF. Готово")
-        finally:
-            # Разблокируем окно в любом случае (даже после ошибки)
-            self.attributes("-disabled", False)
-            self.focus_set()  # Возвращаем фокус окну
-
-    def process_preview(self):
-        """
-        Генерирует PDF во временный файл и открывает окно предпросмотра.
-        """
-        selected_barcodes = self.selected_for_generation
-        if not selected_barcodes:
-            messagebox.showwarning("Внимание", "Список для генерации пуст.")
-            return
-
-        # Создаем временный файл, но не удаляем его сразу
-        temp_file_descriptor, temp_file_path = tempfile.mkstemp(suffix=".pdf")
-        os.close(temp_file_descriptor)
-
-        try:
-            self.update_status("Генерация PDF для предпросмотра...")
-            page_settings = {
-                "margins": {
-                    "top": self.margin_top,
-                    "bottom": self.margin_bottom,
-                    "left": self.margin_left,
-                    "right": self.margin_right,
-                },
-                "orientation": self.orientation,
-            }
-            pdf_generator.create_pdf_from_barcodes(
-                selected_barcodes,
-                self.barcode_dir,
-                temp_file_path,
-                "Preview",
-                page_settings,
-            )
-            self.update_status("Готово к предпросмотру.")
-            # Открываем окно предпросмотра, передавая ему путь к файлу
-            PDFPreviewWindow(self, temp_file_path, self.selected_printer)
-        except Exception as e:
-            messagebox.showerror(
-                "Ошибка", f"Не удалось создать PDF для предпросмотра:\n{e}"
-            )
-            os.remove(temp_file_path)  # Удаляем временный файл в случае ошибки
-
-    def process_printing(self):
-        """
-        Обрабатывает нажатие на кнопку "Сгенерировать и печатать".
-        """
-        selected_barcodes = self.selected_for_generation
-        if not selected_barcodes:
-            messagebox.showwarning("Внимание", "Список для генерации пуст.")
-            return
-
-        temp_file_descriptor, temp_file_path = tempfile.mkstemp(suffix=".pdf")
-        os.close(temp_file_descriptor)
-
-        try:
-            self.attributes("-disabled", True)
-            self.update_status("Генерация PDF для печати...")
-            self.update_idletasks()
-
-            page_settings = {
-                "margins": {
-                    "top": self.margin_top,
-                    "bottom": self.margin_bottom,
-                    "left": self.margin_left,
-                    "right": self.margin_right,
-                },
-                "orientation": self.orientation,
-            }
-            pdf_generator.create_pdf_from_barcodes(
-                selected_barcodes,
-                self.barcode_dir,
-                temp_file_path,
-                title="Печать штрих-кодов",
-                page_settings=page_settings,
-            )
-
-            self.update_status("Отправка на печать...")
-            self.update_idletasks()
-
-            # Проверяем, выбран ли принтер
-            if not self.selected_printer:
-                messagebox.showerror(
-                    "Ошибка печати",
-                    "Принтер не выбран. Проверьте настройки и наличие принтеров в системе.",
-                )
-                return
-
-            # Используем команду 'printto' для печати на конкретном принтере
-            win32api.ShellExecute(
-                0,  # hwnd
-                "printto",  # verb
-                temp_file_path,  # file
-                f'"{self.selected_printer}"',  # params: printer name
-                ".",  # directory
-                0,  # show command
-            )
-            self.update_status("Документ отправлен на печать. Готово.")
-            messagebox.showinfo("Печать", "Документ отправлен на печать.")
-
-        except Exception as e:
-            print(f"Ошибка при генерации или печати PDF: {e}")
-            messagebox.showerror("Ошибка", f"Произошла ошибка:\n{e}")
-            self.update_status("Ошибка при печати. Готово.")
-        finally:
-            self.attributes("-disabled", False)
-            self.focus_set()
-
-
-class PDFPreviewWindow(tk.Toplevel):
-    """Окно для предпросмотра PDF-файла перед печатью."""
-
-    def __init__(self, parent, pdf_path, selected_printer):
-        super().__init__(parent)
-        self.parent = parent
-        self.pdf_path = pdf_path
-        self.selected_printer = selected_printer
-        self.doc = None
-        self.current_page = 0
-        self.total_pages = 0
-        self.photo_image = None  # Ссылка на изображение
-
-        self.title("Предпросмотр PDF")
-        self.geometry("800x600")
-        self.transient(parent)  # Окно будет поверх родительского
-        self.grab_set()  # Модальное окно
-
-        try:
-            self.doc = fitz.open(self.pdf_path)
-            self.total_pages = len(self.doc)
-        except Exception as e:
-            messagebox.showerror(
-                "Ошибка", f"Не удалось открыть PDF-файл:\n{e}", parent=self
-            )
-            self.destroy()
-            return
-
-        self.create_widgets()
-        self.load_page()
-
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def create_widgets(self):
-        # --- Верхняя панель с навигацией ---
-        nav_frame = ttk.Frame(self)
-        nav_frame.pack(fill="x", padx=10, pady=5)
-
-        self.prev_button = ttk.Button(
-            nav_frame, text="<< Пред.", command=self.prev_page
-        )
-        self.prev_button.pack(side="left")
-
-        self.page_label = ttk.Label(nav_frame, text="Страница 1/1", anchor="center")
-        self.page_label.pack(side="left", expand=True, fill="x")
-
-        self.next_button = ttk.Button(
-            nav_frame, text="След. >>", command=self.next_page
-        )
-        self.next_button.pack(side="left")
-
-        print_button = ttk.Button(nav_frame, text="Печать", command=self.print_pdf)
-        print_button.pack(side="right", padx=(20, 0))
-
-        # --- Область для отображения страницы ---
-        self.canvas = tk.Canvas(self, bg="gray")
-        self.canvas.pack(fill="both", expand=True)
-
-    def load_page(self):
-        if not self.doc:
-            return
-
-        page = self.doc.load_page(self.current_page)
-        # Рендерим страницу в изображение (pixmap)
-        pix = page.get_pixmap()
-        # Конвертируем в формат, понятный tkinter
-        img_data = pix.tobytes("ppm")
-        self.photo_image = tk.PhotoImage(data=img_data)
-
-        # Отображаем на холсте
-        self.canvas.create_image(0, 0, anchor="nw", image=self.photo_image)
-
-        # Обновляем информацию о странице
-        self.page_label.config(
-            text=f"Страница {self.current_page + 1}/{self.total_pages}"
-        )
-        self.prev_button.config(state="normal" if self.current_page > 0 else "disabled")
-        self.next_button.config(
-            state="normal" if self.current_page < self.total_pages - 1 else "disabled"
-        )
-
-    def prev_page(self):
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.load_page()
-
-    def next_page(self):
-        if self.current_page < self.total_pages - 1:
-            self.current_page += 1
-            self.load_page()
-
-    def print_pdf(self):
-        if not self.selected_printer:
-            messagebox.showerror("Ошибка печати", "Принтер не выбран.", parent=self)
-            return
-
-        try:
-            win32api.ShellExecute(
-                0, "printto", self.pdf_path, f'"{self.selected_printer}"', ".", 0
-            )
-            messagebox.showinfo("Печать", "Документ отправлен на печать.", parent=self)
-            self.on_close()  # Закрываем окно после отправки на печать
-        except Exception as e:
-            messagebox.showerror(
-                "Ошибка", f"Не удалось отправить на печать:\n{e}", parent=self
-            )
-
-    def on_close(self):
-        if self.doc:
-            self.doc.close()
-        os.remove(self.pdf_path)  # Удаляем временный файл
-        self.destroy()
 
 
 if __name__ == "__main__":

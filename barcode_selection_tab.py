@@ -1,24 +1,19 @@
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk
+from typing import Dict
 
 
 class BarcodeSelectionTab(ttk.Frame):
-    """
-    Вкладка для отображения всех доступных штрих-кодов с чекбоксами для выбора.
-    """
 
-    def __init__(self, parent, app, *args, **kwargs):
+    def __init__(self, parent: ttk.Notebook, app, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
-        self.app = app  # Ссылка на основной класс приложения
-
-        # Словарь для хранения переменных чекбоксов {имя_файла: tk.IntVar}
-        self.checkbox_vars = {}
-
+        self.app = app
+        self.checkbox_vars: Dict[str, tk.IntVar] = {}
         self.create_widgets()
 
-    def create_widgets(self):
-        """Создает виджеты на вкладке."""
-        # --- Нижний фрейм для кнопок управления ---
+    def create_widgets(self) -> None:
         bottom_frame = ttk.Frame(self)
         bottom_frame.pack(side="bottom", fill="x", pady=10, padx=10)
 
@@ -65,21 +60,16 @@ class BarcodeSelectionTab(ttk.Frame):
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # --- Привязка событий прокрутки колеса мыши ---
-        # Это ключевой момент, которого не хватало.
-        # Мы привязываем событие прокрутки к canvas, чтобы он мог скроллиться.
         canvas.bind_all(
             "<MouseWheel>",
             lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"),
         )
-        # Также привяжем к самому фрейму, чтобы прокрутка работала, когда курсор над элементами
         self.scrollable_frame.bind_all(
             "<MouseWheel>",
             lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"),
         )
 
-    def populate_barcodes(self, barcode_files):
-        """Заполняет фрейм чекбоксами на основе списка файлов."""
+    def populate_barcodes(self, barcode_files: list[str]) -> None:
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         self.checkbox_vars.clear()
@@ -90,17 +80,13 @@ class BarcodeSelectionTab(ttk.Frame):
             cb.pack(anchor="w", padx=10, pady=2, fill="x")
             self.checkbox_vars[filename] = var
 
-    def add_selected_to_main_list(self):
-        """Добавляет выбранные штрих-коды в основной список генерации."""
+    def add_selected_to_main_list(self) -> None:
         self.app.add_barcodes_from_selection_tab(self.checkbox_vars)
-        # self.app.switch_to_main_tab() # Этот вызов теперь находится внутри add_barcodes_from_selection_tab
 
-    def select_all(self):
-        """Отмечает все чекбоксы в списке."""
+    def select_all(self) -> None:
         for var in self.checkbox_vars.values():
             var.set(1)
 
-    def deselect_all(self):
-        """Снимает отметки со всех чекбоксов в списке."""
+    def deselect_all(self) -> None:
         for var in self.checkbox_vars.values():
             var.set(0)
