@@ -233,6 +233,7 @@ class MainTab(ttk.Frame):
         self.quantity_input.delete(0, tk.END)
         self.quantity_input.insert(0, "1")
         self.barcode_selector.set("")
+        self.barcode_selector.focus_set()
 
     def add_barcodes_from_selection(self, checkbox_vars: dict) -> int:
         added_count = 0

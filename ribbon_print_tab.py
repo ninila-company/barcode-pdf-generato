@@ -179,6 +179,8 @@ class RibbonPrintTab(ttk.Frame):
         self.selected_for_printing[filename] = quantity
         self.update_print_list_view()
         self.show_pdf_preview(filename)
+        self.pdf_selector.set("")
+        self.pdf_selector.focus_set()
         self.app.update_status(f"Добавлен: {filename} (x{quantity})")
 
     def update_print_list_view(self):
@@ -188,8 +190,24 @@ class RibbonPrintTab(ttk.Frame):
         for filename, quantity in self.selected_for_printing.items():
             self.print_list_view.insert("", tk.END, values=(filename, quantity, "❌"))
 
-    def clear_list(self, silent=False):
-        """Очищает список для печати."""
+    def add_selected_from_selection(self, checkbox_vars: dict) -> int:
+        """Добавляет выбранные штрихкоды в список печати с ленты с количеством 1."""
+        added = 0
+        for filename, var in checkbox_vars.items():
+            if var.get() == 1:
+                if filename not in self.selected_for_printing:
+                    self.selected_for_printing[filename] = 1
+                    added += 1
+                var.set(0)
+        if added:
+            self.update_print_list_view()
+        return added
+
+    def switch_to_self(self):
+        self.app.notebook.select(self)
+
+    def clear_list(self, silent: bool = False):
+        """Очищает список для печати с ленты."""
         if not self.selected_for_printing and not silent:
             return
         self.selected_for_printing.clear()

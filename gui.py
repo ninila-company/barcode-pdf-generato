@@ -9,6 +9,7 @@ import win32print
 
 import app_styles
 import barcode_selection_tab
+import ribbon_barcode_selection_tab
 import config_manager
 import main_tab
 import ribbon_print_tab
@@ -63,12 +64,16 @@ class BarcodePDFApp(tk.Tk):
         self.selection_tab = barcode_selection_tab.BarcodeSelectionTab(
             self.notebook, self
         )
+        self.ribbon_selection_tab = ribbon_barcode_selection_tab.RibbonBarcodeSelectionTab(
+            self.notebook, self
+        )
         self.ribbon_tab = ribbon_print_tab.RibbonPrintTab(self.notebook, self)
         self.settings_tab = settings_tab.SettingsTab(self.notebook, self)
 
-        self.notebook.add(self.main_tab, text="Главная")
-        self.notebook.add(self.selection_tab, text="Выбор штрих-кодов")
+        self.notebook.add(self.main_tab, text="Печать с листа")
+        self.notebook.add(self.selection_tab, text="Выбор штрих-кодов для печати с листа")
         self.notebook.add(self.ribbon_tab, text="Печать с ленты")
+        self.notebook.add(self.ribbon_selection_tab, text="Выбор штрих-кодов для печати с ленты")
         self.notebook.add(self.settings_tab, text="Настройки")
 
         self.status_bar = ttk.Label(
@@ -109,6 +114,7 @@ class BarcodePDFApp(tk.Tk):
             self.main_tab.set_barcodes(barcode_files)
             self.selection_tab.populate_barcodes(barcode_files)
             self.ribbon_tab.load_pdf_list()
+            self.ribbon_selection_tab.populate_files(self.ribbon_tab.all_pdf_files)
             self.update_status("Готово")
 
     def add_barcodes_from_selection_tab(self, checkbox_vars):
@@ -116,6 +122,12 @@ class BarcodePDFApp(tk.Tk):
         if added > 0:
             self.update_status(f"Добавлено {added} новых позиций в список.")
         self.main_tab.switch_to_main_tab()
+
+    def add_pdfs_from_ribbon_selection_tab(self, checkbox_vars):
+        added = self.ribbon_tab.add_selected_from_selection(checkbox_vars)
+        if added > 0:
+            self.update_status(f"Добавлено {added} новых позиций в список печати с ленты.")
+        self.ribbon_tab.switch_to_self()
 
     def update_status(self, message):
         self.status_bar.config(text=message)
