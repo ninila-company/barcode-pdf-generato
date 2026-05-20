@@ -29,10 +29,16 @@ class MainTab(ttk.Frame):
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True)
 
-        left_panel = ttk.Frame(main_frame)
+        header = ttk.Label(main_frame, text="Печать с листа", font=("Segoe UI", 14, "bold"), anchor="center")
+        header.pack(fill="x", pady=(0, 10))
+
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill="both", expand=True)
+
+        left_panel = ttk.Frame(content_frame)
         left_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
-        right_panel = ttk.Frame(main_frame)
+        right_panel = ttk.Frame(content_frame)
         right_panel.pack(side="right", fill="y", expand=False)
 
         selection_frame = ttk.LabelFrame(
@@ -145,6 +151,7 @@ class MainTab(ttk.Frame):
             preview_frame,
             text="Выберите штрих-код",
             background=self.app.FRAME_BG,
+            anchor="center",
         )
         self.preview_label.pack(fill="both", expand=True)
 

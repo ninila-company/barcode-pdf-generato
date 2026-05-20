@@ -25,11 +25,15 @@ class BarcodePDFApp(tk.Tk):
         self.geometry("850x600")
 
         self.cfg = config_manager.AppConfig.load()
+        default_printer = None
+        try:
+            default_printer = win32print.GetDefaultPrinter()
+        except RuntimeError:
+            pass
         if not self.cfg.selected_printer:
-            try:
-                self.cfg.selected_printer = win32print.GetDefaultPrinter()
-            except RuntimeError:
-                self.cfg.selected_printer = None
+            self.cfg.selected_printer = default_printer
+        if not self.cfg.ribbon_printer:
+            self.cfg.ribbon_printer = default_printer
 
         self.setup_styles()
         self.create_widgets()

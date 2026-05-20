@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 
 import fitz
 import pytest
@@ -138,6 +137,7 @@ class TestAppConfig:
         assert config.barcode_dir == "barcode_images"
         assert config.pdf_source_dir == "pdf_barcodes"
         assert config.selected_printer is None
+        assert config.ribbon_printer is None
         assert config.page_settings.margin_top == 25
 
     def test_save_and_load_roundtrip(self, tmp_path: str):
@@ -146,6 +146,7 @@ class TestAppConfig:
             barcode_dir="/test/barcodes",
             pdf_source_dir="/test/pdfs",
             selected_printer="Test Printer",
+            ribbon_printer="Ribbon Printer",
             page_settings=PageSettings(
                 margin_top=15, margin_bottom=5, margin_left=20, margin_right=20, orientation="Альбомная"
             ),
@@ -156,6 +157,7 @@ class TestAppConfig:
         assert loaded.barcode_dir == original.barcode_dir
         assert loaded.pdf_source_dir == original.pdf_source_dir
         assert loaded.selected_printer == original.selected_printer
+        assert loaded.ribbon_printer == original.ribbon_printer
         assert loaded.page_settings == original.page_settings
 
     def test_validate_valid_config(self):

@@ -29,11 +29,17 @@ class RibbonPrintTab(ttk.Frame):
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True)
 
-        left_panel = ttk.Frame(main_frame)
-        left_panel.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        header = ttk.Label(main_frame, text="Печать с ленты", font=("Segoe UI", 14, "bold"), anchor="center")
+        header.pack(fill="x", pady=(0, 10))
 
-        right_panel = ttk.Frame(main_frame)
-        right_panel.pack(side="right", fill="y", expand=False, padx=(0, 10), pady=10)
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill="both", expand=True)
+
+        left_panel = ttk.Frame(content_frame)
+        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
+        right_panel = ttk.Frame(content_frame)
+        right_panel.pack(side="right", fill="y", expand=False)
 
         # --- 1. Фрейм выбора ---
         selection_frame = ttk.LabelFrame(
@@ -56,7 +62,7 @@ class RibbonPrintTab(ttk.Frame):
         ttk.Label(selection_frame, text="Кол-во:").grid(
             row=0, column=2, padx=(10, 5), sticky="w"
         )
-        self.quantity_input = ttk.Entry(selection_frame, width=10)
+        self.quantity_input = ttk.Entry(selection_frame, width=8)
         self.quantity_input.insert(0, "1")
         self.quantity_input.grid(row=0, column=3, padx=5, sticky="w")
 
@@ -66,7 +72,7 @@ class RibbonPrintTab(ttk.Frame):
             command=self.add_to_list,
             style="Success.TButton",
         )
-        add_button.grid(row=0, column=4, padx=(5, 0))
+        add_button.grid(row=0, column=4, padx=(10, 0))
         selection_frame.columnconfigure(1, weight=1)
 
         # --- 2. Список для печати ---
@@ -92,6 +98,11 @@ class RibbonPrintTab(ttk.Frame):
         self.print_list_view.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        total_frame = ttk.Frame(list_frame)
+        total_frame.pack(fill="x", side="bottom", pady=(5, 0))
+        self.total_count_label = ttk.Label(total_frame, text="Всего для печати: 0")
+        self.total_count_label.pack(side="right")
+
         # Привязываем событие двойного клика для редактирования
         self.print_list_view.bind("<Double-1>", self.edit_list_item)
         # Обновляем предпросмотр при выборе из списка
@@ -114,7 +125,7 @@ class RibbonPrintTab(ttk.Frame):
             command=self.process_ribbon_printing,
             style="Success.TButton",
         )
-        print_button.pack(pady=(0, 5))
+        print_button.pack(pady=(5, 10))
 
         # --- 4. Фрейм для предпросмотра ---
         preview_frame = ttk.LabelFrame(right_panel, text="Предпросмотр", padding=10)
@@ -189,6 +200,11 @@ class RibbonPrintTab(ttk.Frame):
             self.print_list_view.delete(i)
         for filename, quantity in self.selected_for_printing.items():
             self.print_list_view.insert("", tk.END, values=(filename, quantity, "❌"))
+        self.update_total_count()
+
+    def update_total_count(self):
+        total = sum(self.selected_for_printing.values())
+        self.total_count_label.config(text=f"Всего для печати: {total}")
 
     def add_selected_from_selection(self, checkbox_vars: dict) -> int:
         """Добавляет выбранные штрихкоды в список печати с ленты с количеством 1."""
@@ -333,8 +349,8 @@ class RibbonPrintTab(ttk.Frame):
             messagebox.showwarning("Внимание", "Список для печати пуст.")
             return
 
-        if not self.app.cfg.selected_printer:
-            messagebox.showerror("Ошибка", "Принтер не выбран в Настройках.")
+        if not self.app.cfg.ribbon_printer:
+            messagebox.showerror("Ошибка", "Принтер для ленты не выбран в Настройках.")
             return
 
         temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
@@ -345,7 +361,7 @@ class RibbonPrintTab(ttk.Frame):
                 self.selected_for_printing, self.app.cfg.pdf_source_dir, temp_path
             )
             win32api.ShellExecute(
-                0, "printto", temp_path, f'"{self.app.cfg.selected_printer}"', ".", 0
+                0, "printto", temp_path, f'"{self.app.cfg.ribbon_printer}"', ".", 0
             )
             return temp_path
 

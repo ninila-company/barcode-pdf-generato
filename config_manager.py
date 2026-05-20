@@ -35,6 +35,7 @@ class AppConfig:
     barcode_dir: str = "barcode_images"
     pdf_source_dir: str = "pdf_barcodes"
     selected_printer: Optional[str] = None
+    ribbon_printer: Optional[str] = None
     page_settings: PageSettings = field(default_factory=PageSettings)
 
     @classmethod
@@ -48,6 +49,7 @@ class AppConfig:
         barcode_dir = parser.get("Settings", "BarcodeDir", fallback="barcode_images")
         pdf_source_dir = parser.get("Settings", "PdfSourceDir", fallback="pdf_barcodes")
         selected_printer = parser.get("Settings", "SelectedPrinter", fallback=None) or None
+        ribbon_printer = parser.get("Settings", "RibbonPrinter", fallback=None) or None
 
         page_settings = PageSettings(
             margin_top=parser.getint("PageSettings", "MarginTop", fallback=25),
@@ -61,6 +63,7 @@ class AppConfig:
             barcode_dir=barcode_dir,
             pdf_source_dir=pdf_source_dir,
             selected_printer=selected_printer,
+            ribbon_printer=ribbon_printer,
             page_settings=page_settings,
         )
 
@@ -70,6 +73,7 @@ class AppConfig:
             "BarcodeDir": self.barcode_dir,
             "PdfSourceDir": self.pdf_source_dir,
             "SelectedPrinter": self.selected_printer or "",
+            "RibbonPrinter": self.ribbon_printer or "",
         }
         parser["PageSettings"] = {
             "MarginTop": str(self.page_settings.margin_top),

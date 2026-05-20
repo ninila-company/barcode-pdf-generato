@@ -59,13 +59,21 @@ class SettingsTab(ttk.Frame):
         printer_frame = ttk.LabelFrame(self, text="Настройки печати", padding=15)
         printer_frame.pack(fill="x", padx=10, pady=10)
 
-        ttk.Label(printer_frame, text="Принтер:").grid(
+        ttk.Label(printer_frame, text="Принтер для печати с листа:").grid(
             row=0, column=0, sticky="w", pady=(0, 5)
         )
 
         self.printer_selector = ttk.Combobox(printer_frame, state="readonly", width=68)
         self.printer_selector.grid(row=1, column=0, sticky="ew")
         self.printer_selector.bind("<<ComboboxSelected>>", self.on_printer_select)
+
+        ttk.Label(printer_frame, text="Принтер для печати с ленты:").grid(
+            row=2, column=0, sticky="w", pady=(8, 5)
+        )
+
+        self.ribbon_printer_selector = ttk.Combobox(printer_frame, state="readonly", width=68)
+        self.ribbon_printer_selector.grid(row=3, column=0, sticky="ew")
+        self.ribbon_printer_selector.bind("<<ComboboxSelected>>", self.on_ribbon_printer_select)
 
         printer_frame.columnconfigure(0, weight=1)
         self.load_printers()
@@ -152,11 +160,25 @@ class SettingsTab(ttk.Frame):
             self.printer_selector.current(0)
             self.app.cfg.selected_printer = self.printer_selector.get()
 
+        self.ribbon_printer_selector["values"] = printers
+        if self.app.cfg.ribbon_printer in printers:
+            self.ribbon_printer_selector.set(self.app.cfg.ribbon_printer)
+        elif printers:
+            self.ribbon_printer_selector.current(0)
+            self.app.cfg.ribbon_printer = self.ribbon_printer_selector.get()
+
     def on_printer_select(self, event=None):
         self.app.cfg.selected_printer = self.printer_selector.get()
         self.app.save_config()
         self.app.update_status(
-            f"Принтер по умолчанию изменен на: {self.app.cfg.selected_printer}"
+            f"Принтер для листа изменен на: {self.app.cfg.selected_printer}"
+        )
+
+    def on_ribbon_printer_select(self, event=None):
+        self.app.cfg.ribbon_printer = self.ribbon_printer_selector.get()
+        self.app.save_config()
+        self.app.update_status(
+            f"Принтер для ленты изменен на: {self.app.cfg.ribbon_printer}"
         )
 
     def select_barcode_dir(self):
